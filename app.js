@@ -1059,7 +1059,7 @@ function buildTerrain(){
   for(let j=0;j<=NZ;j++) for(let i=0;i<=NX;i++){ let x=-SLAB.w/2+SLAB.w*i/NX, z=OCZ-SLAB.d/2+SLAB.d*j/NZ; [x,z]=clampRB(x,z); const y=terrainH(x,z); pos.push(x,y,z); terrainColor(x,z,y,c); col.push(c.r,c.g,c.b); }
   for(let j=0;j<NZ;j++) for(let i=0;i<NX;i++){ const a=j*(NX+1)+i, b=a+NX+1; idx.push(a,b,a+1,a+1,b,b+1); }
   const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3)); g.setAttribute('color',new THREE.Float32BufferAttribute(col,3)); g.setIndex(idx); g.computeVertexNormals();
-  const m=new THREE.Mesh(g,new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.95})); m.receiveShadow=true; inner.add(m);
+  const m=new THREE.Mesh(g,applyUnderwater(new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.95}))); m.receiveShadow=true; inner.add(m);
   // the seabed keeps going past the detailed area, sloping off into the deep (fog hides where it ends)
   const bed=new THREE.Mesh(perimeterRing(rrShape(SLAB.w-0.03,SLAB.d-0.03,SLAB.r).getSpacedPoints(360),[0.996,1.03,1.08,1.18,1.35,1.6,2,2.7,3.8,5.5,8,12],(x,z)=>terrainH(x,z),true),m.material);
   bed.receiveShadow=true; inner.add(bed); isl.seabed=bed;
@@ -1067,9 +1067,15 @@ function buildTerrain(){
 }
 function riverPath(start,dir){ const pts=[start]; let x=start[0], z=start[1]; const l=Math.hypot(dir[0],dir[1]), dx=dir[0]/l, dz=dir[1]/l;
   for(let i=0;i<80;i++){ x+=dx*0.55+Math.sin(i*1.3)*0.1; z+=dz*0.55+Math.cos(i*1.1)*0.1; pts.push([x,z]); if(Math.hypot(x-VOLC.x,z-VOLC.z)>VOLC.r&&terrainH(x,z)<-0.36){ pts.push([x+dx*0.8,z+dz*0.8]); break; } } return pts; }
+// darkens the water over coral: splats every coral position into the height texture's G channel
+function bakeReefMask(){ const t=isl.hTex, N=t.image.width, d=t.image.data, cell=SLAB.w/N, R=1.5;
+  (isl.coralPts||[]).forEach(([x,y,z])=>{ const ci=(x+SLAB.w/2)/SLAB.w*N, cj=(z-(OCZ-SLAB.d/2))/SLAB.d*N, rr=Math.ceil(R/cell);
+    for(let j=Math.max(0,Math.floor(cj-rr));j<=Math.min(N-1,Math.ceil(cj+rr));j++) for(let i=Math.max(0,Math.floor(ci-rr));i<=Math.min(N-1,Math.ceil(ci+rr));i++){
+      const dd=Math.hypot((i-ci)*cell,(j-cj)*cell*SLAB.d/SLAB.w); if(dd>R) continue; const k=(j*N+i)*4+1; d[k]=Math.min(255,d[k]+Math.round(90*(1-dd/R))); } });
+  t.needsUpdate=true; }
 function heightTex(){
   const N=256, data=new Uint8Array(N*N*4);
-  for(let j=0;j<N;j++) for(let i=0;i<N;i++){ const x=-SLAB.w/2+SLAB.w*(i+0.5)/N, z=OCZ-SLAB.d/2+SLAB.d*(j+0.5)/N; const y=surfRaw(x,z); const v=clamp((y+4.5)/5,0,1)*255; const k=(j*N+i)*4; data[k]=v; data[k+1]=v; data[k+2]=v; data[k+3]=255; }
+  for(let j=0;j<N;j++) for(let i=0;i<N;i++){ const x=-SLAB.w/2+SLAB.w*(i+0.5)/N, z=OCZ-SLAB.d/2+SLAB.d*(j+0.5)/N; const y=surfRaw(x,z); const v=clamp((y+4.5)/5,0,1)*255; const k=(j*N+i)*4; data[k]=v; data[k+1]=0; data[k+2]=v; data[k+3]=255; }
   const t=new THREE.DataTexture(data,N,N,THREE.RGBAFormat); t.magFilter=THREE.LinearFilter; t.minFilter=THREE.LinearFilter; t.needsUpdate=true; return t;
 }
 function waveHjs(x,z,t){
@@ -1086,6 +1092,7 @@ function makeWaterSurface(hTex){
     float ripH(vec2 p){ float h=0.; for(int i=0;i<4;i++){ float age=uTime-uRip[i].z; if(age>0.&&age<4.){ float f=length(p-uRip[i].xy)-age*2.4; h+=sin(f*6.)*exp(-f*f*2.)*exp(-age*0.9)*0.06*uRip[i].w; } } return h; }
     vec2 ripRing(vec2 p){ vec2 r=vec2(0.); for(int i=0;i<4;i++){ float age=uTime-uRip[i].z; if(age>0.&&age<4.){ float f=length(p-uRip[i].xy)-age*2.4, e=exp(-f*f*2.)*exp(-age*0.9)*uRip[i].w; r+=vec2(e*(0.5+0.5*sin(f*6.)),e*uRipG[i]); } } return r; }`;
   const HS=`uniform sampler2D uH; float terr(vec2 w){ vec2 uv=vec2((w.x+${(SLAB.w/2).toFixed(2)})/${SLAB.w.toFixed(1)},(w.y-(${(OCZ-SLAB.d/2).toFixed(2)}))/${SLAB.d.toFixed(1)}); return texture2D(uH,uv).r*5.-4.5; }
+    float reefM(vec2 w){ vec2 uv=vec2((w.x+${(SLAB.w/2).toFixed(2)})/${SLAB.w.toFixed(1)},(w.y-(${(OCZ-SLAB.d/2).toFixed(2)}))/${SLAB.d.toFixed(1)}); return texture2D(uH,uv).g; }
     float waveH(vec2 p,float t,float depth){ float h=0.06*sin(dot(p,vec2(0.55,0.25))+t*1.3)+0.04*sin(dot(p,vec2(-0.3,0.7))*1.6+t*1.9)+0.025*sin(dot(p,vec2(0.8,-0.5))*2.7+t*2.6)+0.015*sin(dot(p,vec2(-0.6,-0.6))*4.1+t*3.3); return h*(0.2+0.8*smoothstep(0.05,2.,depth)); }`;
   const m=new THREE.ShaderMaterial({uniforms:u,transparent:true,
     vertexShader:HS+`
@@ -1104,9 +1111,10 @@ function makeWaterSurface(hTex){
       void main(){
         float depth=-0.31-terr(vP);
         if(depth<-0.06) discard;
-        vec3 col=mix(vec3(0.62,0.95,0.86),vec3(0.2,0.78,0.82),smoothstep(0.05,0.7,depth));
-        col=mix(col,vec3(0.1,0.52,0.76),smoothstep(0.7,1.6,depth));
-        col=mix(col,vec3(0.05,0.26,0.58),smoothstep(1.6,3.4,depth));
+        vec3 col=mix(vec3(0.37,0.89,0.86),vec3(0.13,0.71,0.79),smoothstep(0.05,0.7,depth));
+        col=mix(col,vec3(0.12,0.5,0.72),smoothstep(0.7,1.8,depth));
+        col=mix(col,vec3(0.04,0.25,0.48),smoothstep(1.8,3.6,depth));
+        float rm=reefM(vP)*smoothstep(0.4,1.2,depth); col=mix(col,vec3(0.05,0.3,0.45),rm*0.5);
         float far=1.-smoothstep(60.,260.,length(vW-cameraPosition));
         vec3 n=normalize(vN), v=normalize(cameraPosition-vW), hh=normalize(uSun+v);
         { vec2 q=vP*0.4+vec2(uTime*0.06,uTime*0.04); float d0=noise(q), nx=noise(q+vec2(0.6,0.))-d0, nz=noise(q+vec2(0.,0.6))-d0; n=normalize(n+vec3(-nx,0.,-nz)*0.35*(1.-vNear)*(0.3+0.7*far)); }
@@ -1123,7 +1131,7 @@ function makeWaterSurface(hTex){
         col*=mix(1.,0.42,uNight);
         float bio=uNight*(0.25+uBass*1.1)*smoothstep(0.55,0.88,noise(vP*1.6-uTime*0.3))*far*(1.-smoothstep(22.,32.,length(vP-vec2(0.,${OCZ.toFixed(2)})))); // glows around the island, not the open sea
         col+=vec3(0.1,0.85,1.)*(bio+rp.y*uNight*1.4)+uNight*vec3(0.,0.03,0.07);
-        float a=mix(0.3,0.72,smoothstep(0.1,3.6,depth));
+        float a=mix(0.22,0.6,smoothstep(0.05,1.6,depth)); a=mix(a,0.85,smoothstep(2.,4.,depth)); a=min(0.9,a+rm*0.12);
         a*=smoothstep(-0.06,0.03,depth);
         gl_FragColor=vec4(col,max(a,foam*smoothstep(-0.06,0.02,depth)));
       }`});
@@ -1208,6 +1216,21 @@ function ribbon2(pts,width,mat,lift,bulge,seg){
   for(let i=0;i<N;i++) for(let j=0;j<M;j++){ const a=i*(M+1)+j, b=a+M+1; idx.push(a,b,a+1,a+1,b,b+1); }
   const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3)); g.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2)); g.setIndex(idx); g.computeVertexNormals();
   const me=new THREE.Mesh(g,mat); me.receiveShadow=true; inner.add(me); return {mesh:me,curve,end:curve.getPoint(1)};
+}
+// Underwater look for the seabed and reef: light absorption tints them turquoise in the shallows and deep blue further
+// down, and soft animated caustics play over them in daylight, fading with depth. Chains onto an existing patch (glowify).
+const UWU={uUwT:{value:0},uUwDay:{value:1}};
+function applyUnderwater(m){ const prev=m.onBeforeCompile;
+  m.onBeforeCompile=(sh,r)=>{ if(prev) prev(sh,r); Object.assign(sh.uniforms,UWU);
+    sh.vertexShader='varying vec3 vUwP;\n'+sh.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\n { vec4 uwp=vec4(transformed,1.);\n #ifdef USE_INSTANCING\n uwp=instanceMatrix*uwp;\n #endif\n vUwP=(modelMatrix*uwp).xyz; }');
+    sh.fragmentShader='varying vec3 vUwP; uniform float uUwT,uUwDay;\n'+
+      'float uwCaus(vec2 p,float t){ vec2 q=p*1.3; float c=0.; for(int i=0;i<3;i++){ q+=vec2(sin(q.y*1.3+t*0.8),cos(q.x*1.1-t*0.6))*0.5; c+=abs(sin(q.x+q.y*0.7+t*0.5)); q=q*1.6+vec2(1.7,9.2); } return pow(max(0.,1.-c*0.38),4.); }\n'+
+      sh.fragmentShader
+      .replace('#include <color_fragment>','#include <color_fragment>\n float uwD=max(0.,-0.31-vUwP.y); diffuseColor.rgb*=mix(vec3(1.),mix(vec3(0.42,0.88,0.92),vec3(0.16,0.44,0.74),smoothstep(0.8,4.,uwD)),smoothstep(0.,0.3,uwD));')
+      .replace('#include <emissivemap_fragment>','#include <emissivemap_fragment>\n totalEmissiveRadiance+=vec3(0.8,1.,0.95)*uwCaus(vUwP.xz,uUwT)*smoothstep(0.03,0.3,uwD)*(1.-smoothstep(2.,7.,uwD))*uUwDay*0.55;');
+  };
+  m.customProgramCacheKey=()=>'uw|'+(prev?prev.toString():'');
+  return m;
 }
 function glowify(m){ m.userData.u={uGlow:{value:0}}; m.onBeforeCompile=sh=>{ sh.uniforms.uGlow=m.userData.u.uGlow; sh.fragmentShader='uniform float uGlow;\n'+sh.fragmentShader.replace('#include <emissivemap_fragment>','#include <emissivemap_fragment>\n totalEmissiveRadiance += diffuseColor.rgb * uGlow;'); }; return m; }
 function coralGeos(){
@@ -1557,7 +1580,7 @@ function init3D(){
   buildFarWorld();
   isl.cWE=C('#1fd7ff');
   const terr=buildTerrain(); terr.userData.tap=groundTap;
-  isl.wu=makeWaterSurface(heightTex());
+  isl.hTex=heightTex(); isl.wu=makeWaterSurface(isl.hTex);
   // light shafts and bubbles inside the water column
   const rayTex=canvasTex(32,128,(c,w,h)=>{ const g=c.createLinearGradient(0,0,0,h); g.addColorStop(0,'rgba(255,255,255,.9)'); g.addColorStop(1,'rgba(255,255,255,0)'); c.fillStyle=g; c.fillRect(0,0,w,h); const g2=c.createLinearGradient(0,0,w,0); g2.addColorStop(0,'rgba(0,0,0,1)'); g2.addColorStop(0.5,'rgba(0,0,0,0)'); g2.addColorStop(1,'rgba(0,0,0,1)'); c.globalCompositeOperation='destination-out'; c.fillStyle=g2; c.fillRect(0,0,w,h); },1,1);
   const hw=SLAB.w/2, hd=SLAB.d/2;
@@ -1578,25 +1601,25 @@ function init3D(){
   const CG=coralGeos(), KG=critterGeos(), dmc=new THREE.Object3D(); isl.coralMats=[]; isl.anemones=[];
   const reef=(geo,mat,n,cols,d0,d1,sc0,sc1,opt)=>{ opt=opt||{}; const im=new THREE.InstancedMesh(geo,mat,n), cc=cols.map(C); let placed=0; geo.computeBoundingBox(); const gh=Math.max(0.05,geo.boundingBox.max.y);
     for(let i=0;i<n;i++){ const p=randOcean(shelfD(d0),shelfD(d1)); if(!p) continue; const [x,z]=p; const y=terrainH(x,z);
-      dmc.position.set(x,y-0.02,z); const outward=Math.atan2(x,z-OCZ); dmc.rotation.set(opt.tilt?(Math.random()-0.5)*0.4:0,opt.face?outward:Math.random()*6.28,0); const ys=0.85+Math.random()*0.35; let k=sc0+Math.random()*(sc1-sc0); k=Math.min(k,(-0.31-0.3-y)/(gh*ys)); if(k<0.35) continue; dmc.scale.set(k,k*ys,k); dmc.updateMatrix(); im.setMatrixAt(placed,dmc.matrix); im.setColorAt(placed,cc[placed%cc.length]); if(opt.list) opt.list.push(new THREE.Vector3(x,y,z)); placed++; }
+      dmc.position.set(x,y-0.02,z); const outward=Math.atan2(x,z-OCZ); dmc.rotation.set(opt.tilt?(Math.random()-0.5)*0.4:0,opt.face?outward:Math.random()*6.28,0); const ys=0.85+Math.random()*0.35; let k=sc0+Math.random()*(sc1-sc0); k=Math.min(k,(-0.31-0.3-y)/(gh*ys)); if(k<0.35) continue; dmc.scale.set(k,k*ys,k); dmc.updateMatrix(); im.setMatrixAt(placed,dmc.matrix); im.setColorAt(placed,cc[placed%cc.length]); if(opt.list) opt.list.push(new THREE.Vector3(x,y,z)); (isl.coralPts||(isl.coralPts=[])).push([x,y,z]); placed++; }
     im.count=placed; im.castShadow=true; inner.add(im); isl.coralMats.push(mat); return im; };
-  const cm=(o)=>glowify(new THREE.MeshStandardMaterial(Object.assign({color:0xffffff,roughness:0.65},o||{})));
+  const cm=(o)=>applyUnderwater(glowify(new THREE.MeshStandardMaterial(Object.assign({color:0xffffff,roughness:0.65},o||{}))));
   reef(CG.brain,cm(),50,['#ffb36b','#b98bff','#ff8fb8','#ffd98a','#9fe0a0'],5.0,11,0.9,1.7);
   reef(CG.stag,cm(),64,['#ff6fa8','#ffd27a','#7af0d0','#c58bff','#ff9a6b'],5.0,11,1.1,2.0);
   reef(KG.table,cm(),24,['#b7e86b','#ff9ab8','#9ad8ff'],5.2,11,0.9,1.6);
   reef(CG.tube,cm(),32,['#ff9a4a','#ffe27a','#ff6fb8'],5.0,11,1.0,1.7);
   reef(KG.soft,cm(),24,['#d8a7ff','#ffc8a0','#a0f0d8'],5.0,11,0.9,1.6);
-  reef(CG.fan,glowify(new THREE.MeshStandardMaterial({color:0xffffff,map:fanTex(),alphaTest:0.4,side:THREE.DoubleSide,roughness:0.7})),30,['#ff5f8f','#b06bff','#ffb84d'],4.9,10,1.0,1.8,{face:true});
+  reef(CG.fan,applyUnderwater(glowify(new THREE.MeshStandardMaterial({color:0xffffff,map:fanTex(),alphaTest:0.4,side:THREE.DoubleSide,roughness:0.7}))),30,['#ff5f8f','#b06bff','#ffb84d'],4.9,10,1.0,1.8,{face:true});
   reef(CG.brain,cm(),24,['#e7a0ff','#ffa07a','#80e0c0'],4.7,5.9,0.6,1.1);
   reef(KG.anemone,cm(),16,['#ff7ad0','#b88bff','#7ae0ff'],5.2,11,1.0,1.5,{list:isl.anemones});
   reef(KG.star,cm({roughness:0.5}),22,['#2f6bff','#ff7a3d','#3b7bff'],4.8,11,0.9,1.4,{tilt:true});
   reef(KG.urchin,cm({roughness:0.4}),20,['#3a1f4a','#2a2a40'],4.8,11,0.8,1.2);
   reef(KG.cuc,cm({roughness:0.7}),12,['#3b2a2a','#5a3d2a'],5.0,11,0.9,1.3);
   const clamCols=['#3fb8ff','#7a5cff','#28d6c8'];
-  const clamA=reef(CG.clam,std('#efe8dc',{roughness:0.5}),12,['#ffffff'],5.0,11,1,1.4);
-  const mantM=glowify(new THREE.MeshStandardMaterial({color:0xffffff,roughness:0.3}));
+  const clamA=reef(CG.clam,applyUnderwater(std('#efe8dc',{roughness:0.5})),12,['#ffffff'],5.0,11,1,1.4);
+  const mantM=applyUnderwater(glowify(new THREE.MeshStandardMaterial({color:0xffffff,roughness:0.3})));
   const mant=new THREE.InstancedMesh(CG.mantle,mantM,clamA.count); const mt4=new THREE.Matrix4();
-  for(let i=0;i<clamA.count;i++){ clamA.getMatrixAt(i,mt4); mant.setMatrixAt(i,mt4); mant.setColorAt(i,C(clamCols[i%3])); } inner.add(mant); isl.coralMats.push(mantM);
+  for(let i=0;i<clamA.count;i++){ clamA.getMatrixAt(i,mt4); mant.setMatrixAt(i,mt4); mant.setColorAt(i,C(clamCols[i%3])); } inner.add(mant); isl.coralMats.push(mantM); bakeReefMask();
   // detailed reef fish: clownfish by the anemones, Moorish idols, butterflyfish, parrotfish
   isl.fishM=fishMaterial(); isl.fishSets=[];
   FISH.forEach(sp=>{ const im=new THREE.InstancedMesh(fishGeo(sp),isl.fishM,sp.n); inner.add(im);
@@ -2101,6 +2124,7 @@ function update3D(dt,T){
   // lava, magma, and bioluminescent water pulse with the music
   isl.erupt=Math.max(0,(isl.erupt||0)-dt);
   isl.lavaTex.offset.x-=dt*(0.18+lv.bass*0.5);
+  UWU.uUwT.value=T; UWU.uUwDay.value=1-night*0.85;
   isl.lavaS.u.uTime.value=T; isl.lavaS.u.uBass.value=lv.bass; isl.lavaS.u.uBoost.value=isl.erupt||0;
   isl.wu.uTime.value=T; isl.wu.uNight.value=night; isl.wu.uBass.value=lv.bass;
   isl.coralMats.forEach(m=>{ if(m.userData.u) m.userData.u.uGlow.value=night*(0.2+lv.bass*0.9)+0.03; });
