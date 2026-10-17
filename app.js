@@ -965,12 +965,12 @@ function softBodyMat(){
     Object.assign(sh.uniforms,u);
     sh.fragmentShader='uniform vec3 uTSky; uniform vec3 uTGround;\n'+sh.fragmentShader
       .replace('#include <lights_fragment_maps>','#include <lights_fragment_maps>\n { vec3 fbN=inverseTransformDirection(normal,viewMatrix); irradiance+=mix(uTGround,uTSky,0.5+0.5*fbN.y)*PI; }')
-      // soft knee: light above 0.72x the surface colour rolls off toward 1.3x it, so coloured washes tint but never bloom
-      .replace('#include <output_fragment>','{ vec3 fbCap=diffuseColor.rgb*1.3, fbKnee=fbCap*0.72; outgoingLight=mix(outgoingLight,fbKnee+(fbCap-fbKnee)*(1.-exp(-(outgoingLight-fbKnee)/max(fbCap-fbKnee,vec3(1e-3)))),step(fbKnee,outgoingLight)); }\n#include <output_fragment>');
+      // soft knee: light above 0.8x the surface colour rolls off toward 1.15x it, so coloured washes tint but never bloom
+      .replace('#include <output_fragment>','{ vec3 fbCap=diffuseColor.rgb*1.15, fbKnee=fbCap*0.7; outgoingLight=mix(outgoingLight,fbKnee+(fbCap-fbKnee)*(1.-exp(-(outgoingLight-fbKnee)/max(fbCap-fbKnee,vec3(1e-3)))),step(fbKnee,outgoingLight)); }\n#include <output_fragment>');
   };
   return m;
 }
-function updateBodyTint(m,night){ const u=m.userData.tint, k=0.32;
+function updateBodyTint(m,night){ const u=m.userData.tint, k=0.42;
   u.uTSky.value.copy(BODY_TINT.sky[0]).lerp(BODY_TINT.sky[1],night).multiplyScalar(k*lerp(1,0.6,night));
   u.uTGround.value.copy(BODY_TINT.ground[0]).lerp(BODY_TINT.ground[1],night).multiplyScalar(k*0.7*lerp(1,0.6,night)); }
 // bakes soft ambient occlusion into vertex colours: darker near the ground, where limbs meet the body, and under the arms.
@@ -981,7 +981,7 @@ function bakeBodyAO(geo,limbs,body,hgt){
   for(let i=0;i<P.count;i++){ v.fromBufferAttribute(P,i); n.fromBufferAttribute(N,i);
     let o=0; limbs.forEach(([x,y,z,r])=>{ o+=occ(x,y,z,r*1.6); }); const b=body(v.x,v.y); o+=occ(b[0],b[1],b[2],b[3])*0.8;
     const ground=1-0.42*(1-sstep(0,0.32*hgt,v.y))*(0.55-0.45*n.y), grad=0.9+0.1*sstep(0.1,0.7*hgt,v.y);
-    const a=clamp((1-Math.min(0.5,o*1.3))*ground*grad,0.5,1); col[i*3]=a; col[i*3+1]=a*0.985; col[i*3+2]=a*0.97; }
+    const a=clamp((1-Math.min(0.5,o*1.3))*ground*grad,0.5,1); col[i*3]=a; col[i*3+1]=a; col[i*3+2]=a; }
   geo.setAttribute('color',new THREE.BufferAttribute(col,3));
 }
 function makeEnv(){
@@ -1451,6 +1451,78 @@ function plantFree(x,z,r,foot){
 }
 function plantSpot(r,tries,pref,foot){ for(let k=0;k<(tries||300);k++){ const x=(Math.random()-0.5)*36, z=OCZ+(Math.random()-0.5)*36; if(pref&&!pref(x,z)) continue; if(plantFree(x,z,r,foot)) { PLANT_BLOCK.push([x,z,foot||r]); return [x,z]; } } return null; }
 function beachSpot(){ for(let k=0;k<200;k++){ const x=(Math.random()-0.5)*38, z=OCZ+(Math.random()-0.5)*38, d=shoreD(x,z); if(d>-0.35&&d<0.55&&terrainH(x,z)>-0.25){ if(x>-5.4&&x<5.4&&z>-7.8&&z<5.9) continue; if(Math.hypot(x-VOLC.x,z-VOLC.z)<VOLC.r+0.1) continue; return [x,z]; } } return null; }
+/* ---------- the wider world: sky dome, open ocean below the floating island, hazy islands on the horizon ---------- */
+// The sea sits at the floating island's shadow, below its slab: from low views (Shigost's view, Front row) the slab's own
+// edge hides the drop, so it reads as one ocean running to the horizon; from Diorama the island floats above it.
+const FAR={seaY:BASE-1.35,
+  zen:[C('#4fa3e6'),C('#120c33')], haze:[C('#d4ecf6'),C('#3a2f70')], sea:[C('#2a8cc6'),C('#121848')], shallow:[C('#5fd6d8'),C('#26507a')]};
+// Backdrop islands seen from here (a: angle around the island centre, d: distance, r: radius, h: height). When an island
+// becomes visitable, give its entry a scene of its own and swap it in at the same spot so the view from here stays true.
+const FAR_ISLES=[
+  {id:'peak',  kind:'volcano',a:4.45,d:160,r:28,h:32,seed:1},
+  {id:'ridge', kind:'hills',  a:3.55,d:175,r:34,h:19,seed:7},
+  {id:'twin',  kind:'hills',  a:1.25,d:125,r:17,h:13,seed:3},
+  {id:'atoll', kind:'atoll',  a:1.95,d:88, r:11,h:1.5,seed:4},
+  {id:'cay',   kind:'cay',    a:0.35,d:76, r:4.5,h:1.1,seed:2},
+  {id:'islet', kind:'rock',   a:5.55,d:100,r:6, h:7.5,seed:5},
+];
+const farWorld={};
+function farIsleGeo(o){
+  const NS=48, NR=16, pos=[], col=[], idx=[], c=new THREE.Color(), hz=(t,th)=>{ const n=0.12*Math.sin(th*3+o.seed)+0.07*Math.sin(th*7+o.seed*2.3)+0.04*Math.sin(th*13+o.seed);
+    if(o.kind==='volcano') return o.h*Math.pow(Math.max(0,1-t),1.35)*(1+n)-(t<0.07?o.h*0.08:0);
+    if(o.kind==='hills') return o.h*(0.62*Math.exp(-Math.pow((t-0.18)/0.42,2))+0.38*Math.exp(-Math.pow((t-0.62)/0.3,2))*(0.5+0.5*Math.sin(th*2+o.seed)))*(1+n);
+    if(o.kind==='atoll') return t<0.62?-0.4:o.h*Math.exp(-Math.pow((t-0.8)/0.13,2))*(0.75+n*2);
+    if(o.kind==='rock') return o.h*Math.pow(Math.max(0,1-t),0.6)*(1+n*1.5);
+    return o.h*Math.max(0,1-t*t); };
+  const sand=C('#ecdcae'), green=C('#4f9a45'), dark=C('#2f6e3a'), rock=C('#5d5560'), lagoon=FAR.shallow[0];
+  for(let j=0;j<=NR;j++) for(let i=0;i<=NS;i++){ const t=j/NR*1.3, th=i/NS*Math.PI*2, R=o.r*(1+0.16*Math.sin(th*3+o.seed)+0.09*Math.sin(th*5+o.seed*1.7));
+    let y=t<=1?hz(t,th):0.03; if(t<=1) y=Math.max(y*sstep(1,0.82,t)+(t>0.82?0.25*(1-t)/0.18:0),o.kind==='atoll'&&t<0.62?-0.4:0.05);
+    if(t>1) y=0.03;
+    pos.push(Math.cos(th)*R*t,y,Math.sin(th)*R*t);
+    if(t>1||y<0) c.copy(lagoon); else if(t>0.84||y<0.5) c.copy(sand); else c.copy(dark).lerp(green,0.5+0.5*Math.sin(th*9+j)).lerp(rock,o.kind==='rock'?0.7:sstep(o.h*0.55,o.h*0.9,y));
+    col.push(c.r,c.g,c.b); }
+  for(let j=0;j<NR;j++) for(let i=0;i<NS;i++){ const a=j*(NS+1)+i, b=a+NS+1; idx.push(a,b,a+1,a+1,b,b+1); }
+  const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3)); g.setAttribute('color',new THREE.Float32BufferAttribute(col,3)); g.setIndex(idx); g.computeVertexNormals();
+  // a few palms on the low islands so they read as tropical even from far away
+  if(o.kind==='atoll'||o.kind==='cay'){ const parts=[[g.toNonIndexed(),new THREE.Matrix4()]], trunk=new THREE.CylinderGeometry(0.12,0.2,1,5), crown=new THREE.ConeGeometry(1.4,0.5,7);
+    const tc=vcolGeo(trunk,(x,y,z,cc)=>cc.copy(C('#8a6a48'))), cr=vcolGeo(crown,(x,y,z,cc)=>cc.copy(C('#3f8f3a')));
+    const n=o.kind==='atoll'?9:5; for(let k=0;k<n;k++){ const th=k/n*Math.PI*2+o.seed, rr=o.r*(o.kind==='atoll'?0.8:0.3+0.25*(k%2)), x=Math.cos(th)*rr, z=Math.sin(th)*rr, h=2.6+(k%3)*0.6, l=0.15*Math.sin(k*2.1);
+      parts.push([tc,mat4(x+l*h/2,o.h*0.6+h/2,z,0,0,-l)]); parts.push([cr,mat4(x+l*h,o.h*0.6+h,z,Math.PI,k,0)]); }
+    return mergeC(parts); }
+  return g;
+}
+function buildFarWorld(){
+  const sunDir=sun.position.clone().normalize(), U={uNight:{value:0},uTime:{value:0},uSun:{value:sunDir},
+    uZen:{value:FAR.zen[0].clone()},uHaze:{value:FAR.haze[0].clone()},uSea:{value:FAR.sea[0].clone()}};
+  farWorld.u=U;
+  // sky dome: follows the camera, drawn first and behind everything
+  const sky=new THREE.Mesh(new THREE.SphereGeometry(800,32,16),new THREE.ShaderMaterial({uniforms:U,side:THREE.BackSide,depthWrite:false,depthTest:false,
+    vertexShader:'varying vec3 vD; void main(){ vD=normalize((modelMatrix*vec4(position,1.)).xyz-cameraPosition); gl_Position=projectionMatrix*viewMatrix*modelMatrix*vec4(position,1.); }',
+    fragmentShader:'uniform vec3 uZen,uHaze,uSun; uniform float uNight; varying vec3 vD; void main(){ vec3 d=normalize(vD); float e=max(d.y,0.); vec3 c=mix(uHaze,uZen,pow(e,0.5));'+
+      ' c+=vec3(1.,0.93,0.78)*(pow(max(dot(d,uSun),0.),24.)*0.35+pow(max(dot(d,uSun),0.),400.)*0.6)*(1.-uNight); gl_FragColor=linearToOutputTexel(vec4(c,1.)); }'}));
+  sky.renderOrder=-1000; sky.frustumCulled=false; scene.add(sky); farWorld.sky=sky;
+  // open ocean: follows the camera across the plane, glints in the sun, and dissolves into the horizon haze
+  const sg=new THREE.CircleGeometry(700,96); sg.rotateX(-Math.PI/2);
+  const sea=new THREE.Mesh(sg,new THREE.ShaderMaterial({uniforms:U,
+    vertexShader:'varying vec3 vW; void main(){ vec4 w=modelMatrix*vec4(position,1.); vW=w.xyz; gl_Position=projectionMatrix*viewMatrix*w; }',
+    fragmentShader:'uniform vec3 uSea,uHaze,uSun; uniform float uNight,uTime; varying vec3 vW; void main(){ vec3 v=vW-cameraPosition; float dist=length(v);'+
+      ' float fade=1.-smoothstep(30.,220.,dist), w=(0.5*sin(dot(vW.xz,vec2(1.3,0.7))+uTime*1.2)+0.35*sin(dot(vW.xz,vec2(-0.9,1.6))+uTime*1.5)+0.15*sin(dot(vW.xz,vec2(2.7,-2.1))+uTime*2.1))*fade;'+
+      ' vec3 n=normalize(vec3(w*0.08,1.,w*0.06)); vec3 r=reflect(normalize(v),n); float gl=pow(max(dot(r,uSun),0.),60.)*(1.-uNight)*0.8;'+
+      ' vec3 c=uSea*(0.97+0.03*w)+gl; c=mix(c,uHaze,smoothstep(40.,520.,dist)); gl_FragColor=linearToOutputTexel(vec4(c,1.)); }'}));
+  sea.position.y=FAR.seaY; sea.frustumCulled=false; sea.renderOrder=-900; scene.add(sea); farWorld.sea=sea;
+  // distant islands: simple sun shading, dimmed at night, fading into the haze with distance
+  const im=new THREE.ShaderMaterial({uniforms:U,vertexColors:true,
+    vertexShader:'varying vec3 vC,vN,vW; void main(){ vC=color; vN=normalize(mat3(modelMatrix)*normal); vec4 w=modelMatrix*vec4(position,1.); vW=w.xyz; gl_Position=projectionMatrix*viewMatrix*w; }',
+    fragmentShader:'uniform vec3 uHaze,uSun; uniform float uNight; varying vec3 vC,vN,vW; void main(){ float l=0.55+0.6*max(dot(normalize(vN),uSun),0.);'+
+      ' vec3 c=vC*l*mix(1.,0.32,uNight); float dist=length(vW-cameraPosition); c=mix(c,uHaze,clamp(smoothstep(30.,420.,dist)*0.9,0.,0.9)); gl_FragColor=linearToOutputTexel(vec4(c,1.)); }'});
+  farWorld.isles=FAR_ISLES.map(o=>{ const m=new THREE.Mesh(farIsleGeo(o),im); m.position.set(Math.cos(o.a)*o.d,FAR.seaY,OCZ+Math.sin(o.a)*o.d); m.rotation.y=o.seed; m.userData.isle=o.id; scene.add(m); return m; });
+}
+function updateFarWorld(T){
+  const u=farWorld.u; if(!u) return;
+  u.uNight.value=night; u.uTime.value=T;
+  u.uZen.value.copy(FAR.zen[0]).lerp(FAR.zen[1],night); u.uHaze.value.copy(FAR.haze[0]).lerp(FAR.haze[1],night); u.uSea.value.copy(FAR.sea[0]).lerp(FAR.sea[1],night);
+  farWorld.sky.position.copy(camera.position); farWorld.sea.position.x=camera.position.x; farWorld.sea.position.z=camera.position.z;
+}
 function init3D(){
   const canvas=$('#three');
   renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:true,powerPreference:'high-performance'});
@@ -1459,7 +1531,7 @@ function init3D(){
   renderer.outputEncoding=THREE.sRGBEncoding;
   renderer.shadowMap.enabled=true; renderer.shadowMap.type=THREE.PCFSoftShadowMap;
   scene=new THREE.Scene();
-  camera=new THREE.PerspectiveCamera(30,1,0.1,300);
+  camera=new THREE.PerspectiveCamera(30,1,0.1,1000);
   hemi=new THREE.HemisphereLight(C('#fff6fb'),C('#c4b4e0'),0.72); scene.add(hemi);
   sun=new THREE.DirectionalLight(C('#fff2e4'),1.0); sun.position.set(-12,24,15); sun.castShadow=true;
   sun.shadow.mapSize.set(1536,1536); Object.assign(sun.shadow.camera,{left:-26,right:26,top:26,bottom:-26,near:1,far:100}); sun.shadow.bias=-0.0006; sun.shadow.normalBias=0.03;
@@ -1479,6 +1551,7 @@ function init3D(){
   let oy=-4.3;
   [[0.45,std('#ecdcb0',{roughness:0.95})],[0.55,std('#d6ccb6',{roughness:0.95})],[0.5,std('#3d3442',{roughness:0.9})],[0.3,new THREE.MeshStandardMaterial({color:C('#ff6a2a'),emissive:C('#ff4a12'),emissiveIntensity:0.8,roughness:0.6})]].forEach(([t,m],i)=>{ oy-=t; const mm=mesh(rbox(SLAB.w,t,SLAB.d,SLAB.r,0.05),m,0,oy,OCZ); mm.userData.tap=()=>{ squish(1.1); addVibe(1); }; if(i===3) isl.magma=m; });
   const shp=new THREE.Mesh(new THREE.PlaneGeometry(SLAB.w*1.5,SLAB.d*1.5),new THREE.MeshBasicMaterial({map:shadowTexture(),transparent:true,depthWrite:false})); shp.rotation.x=-Math.PI/2; shp.position.set(0,BASE-1.3,OCZ); scene.add(shp);
+  buildFarWorld();
   isl.cWE=C('#1fd7ff');
   const terr=buildTerrain(); terr.userData.tap=()=>{ squish(1.1); addVibe(1); toast('The island hums with the bass'); };
   isl.wu=makeWaterSurface(heightTex());
@@ -1655,9 +1728,9 @@ function init3D(){
     const beams=[-1,0,1].map(o=>{ const bg=new THREE.Group(); bg.add(new THREE.Mesh(coreG,coreM)); bg.add(new THREE.Mesh(haloG,haloM)); bg.userData.o=o; em.add(bg); return bg; });
     laserRoot.add(em); lasers.push({em,beams,coreM,haloM,base:x});
   });
-  // crowd of original Recklyss Studios characters: soft, warm, fabric-like bodies to match Shigost (glossy eyes stay glossy)
+  // crowd of original Recklyss Studios characters: smooth matte bodies to match Shigost (glossy eyes stay glossy)
   const env=makeEnv(); crowd.env=env;
-  const whiteM=softBodyMat(env);
+  const whiteM=softBodyMat(); updateBodyTint(whiteM,0);
   const blackM=new THREE.MeshPhysicalMaterial({color:C('#0b0b0d'),roughness:0.05,metalness:0,clearcoat:1,clearcoatRoughness:0.03,envMap:env,envMapIntensity:1.3});
   crowd.mats=[whiteM,blackM];
   const M=(x,y,z,sx,sy,sz,rx,ry,rz)=>new THREE.Matrix4().compose(new THREE.Vector3(x,y,z),new THREE.Quaternion().setFromEuler(new THREE.Euler(rx||0,ry||0,rz||0)),new THREE.Vector3(sx,sy,sz));
@@ -1774,9 +1847,9 @@ function init3D(){
     c.userData.tap=()=>{ c.userData.boing=1; }; clouds.push(c); });
   // night stars
   const sp=new Float32Array(500*3);
-  for(let i=0;i<500;i++){ const th=Math.random()*Math.PI*2, ph=Math.random()*1.3, r=90; sp[i*3]=r*Math.sin(ph)*Math.cos(th); sp[i*3+1]=r*Math.cos(ph)-10; sp[i*3+2]=r*Math.sin(ph)*Math.sin(th); }
+  for(let i=0;i<500;i++){ const th=Math.random()*Math.PI*2, ph=Math.random()*1.45, r=700; sp[i*3]=r*Math.sin(ph)*Math.cos(th); sp[i*3+1]=r*Math.cos(ph)-10; sp[i*3+2]=r*Math.sin(ph)*Math.sin(th); }
   const sgm=new THREE.BufferGeometry(); sgm.setAttribute('position',new THREE.BufferAttribute(sp,3));
-  starPts=new THREE.Points(sgm,new THREE.PointsMaterial({color:0xffffff,size:1.1,map:tex,transparent:true,opacity:0,depthWrite:false})); scene.add(starPts);
+  starPts=new THREE.Points(sgm,new THREE.PointsMaterial({color:0xffffff,size:8.5,map:tex,transparent:true,opacity:0,depthWrite:false})); scene.add(starPts);
 
   const resize=()=>{ const w=window.innerWidth,h=window.innerHeight; renderer.setPixelRatio(pixelRatio()); renderer.setSize(w,h,false); view.w=w; view.h=h; updateViewTargets(); };
   window.addEventListener('resize',resize); resize();
@@ -1904,6 +1977,7 @@ function update3D(dt,T){
   // day to night
   const nT=show.sky==='day'?0:show.sky==='night'?1:(anyPlaying()?1:0);
   night+=(nT-night)*(1-Math.exp(-dt*0.9));
+  updateFarWorld(T);
   sun.intensity=lerp(1.0,0.05,night);
   hemi.intensity=lerp(0.72,0.32,night);
   hemi.color.copy(dayHemi).lerp(nightHemi,night); hemi.groundColor.copy(dayGround).lerp(nightGround,night);
@@ -2038,7 +2112,7 @@ function update3D(dt,T){
   crowdCheer=Math.max(0,crowdCheer-dt*0.9);
   const d=crowd.dummy, hop=beatPulse*beatPulse, TW=Math.PI*2;
   const wrapA=a=>((a+Math.PI)%TW+TW)%TW-Math.PI;
-  crowd.mats[0].envMapIntensity=lerp(0.35,0.12,night); crowd.mats[1].envMapIntensity=lerp(1.3,0.5,night);
+  updateBodyTint(crowd.mats[0],night); crowd.mats[1].envMapIntensity=lerp(1.3,0.5,night);
   crowd.people.forEach((p,i)=>{
     const camYaw=Math.atan2(camera.position.x-p.x,camera.position.z-p.z);
     if(playing&&p.peek<=0&&Math.random()<dt*0.035) p.peek=1.2+Math.random()*2;

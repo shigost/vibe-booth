@@ -15,6 +15,7 @@ Vibe Booth is a gamified 3D EDM/DJ web app by Recklyss Studios, live at https://
 - Avoid Tone.js nodes that need AudioWorklets (Freeverb, JCReverb, PluckSynth, BitCrusher, FeedbackCombFilter). Use `Tone.Reverb`, synth-based plucks, etc.
 - Monophonic Tone synths must be triggered with increasing times.
 - Island: `SLAB`, `islandR`/`RA` (irregular shoreline), `terrainH`, `buildTerrain`, `makeWaterSurface` (shader), `makeLavaShader`, `VOLC`/`VPROF` (volcano), `riverPath`, reef (`coralGeos`, `critterGeos`, `FISH`), plants (`palm`, `banyan`, `breadfruit`, `pago`, `PLANT_BLOCK` keeps plants off the stage and props).
+- Wider world: `buildFarWorld`/`updateFarWorld` (sky dome, open ocean at `FAR.seaY` below the floating slab, haze), `FAR_ISLES` (backdrop islands on the horizon; swap an entry for a real scene when that island becomes visitable).
 - Stage: guma' latte house, booth, round screen (`drawProj`), sail screen (`drawSail`, mandala visuals), lasers, lava vents (flames), crowd (instanced characters).
 - Shigost: `buildShigost`, `updateShigost`, IK in `ik2`, clips via `sgMove('dance'|'jump')`.
 - Game: `MISSIONS`, `LEVELS`, `complete(id)`, `addXP`, coach pill.
