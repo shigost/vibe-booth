@@ -1049,7 +1049,7 @@ function buildIslet(o){
   const NS=28, F=[0.13,0.27,0.41,0.54,0.66,0.76,0.85,0.92,0.97,1], pos=[], idx=[];
   const top=-0.31+isletLocal(o,0,0).y; pos.push(o.x,top,o.z);
   F.forEach(f=>{ for(let i=0;i<NS;i++){ const th=i/NS*6.283, Rc=isletLocal(o,Math.cos(th)*1e-3,Math.sin(th)*1e-3).Rc, r=Rc*f*0.999, x=o.x+Math.cos(th)*r, z=o.z+Math.sin(th)*r; pos.push(x,-0.31+isletLocal(o,x-o.x,z-o.z).y,z); } });
-  for(let i=0;i<NS;i++){ const th=i/NS*6.283, Rc=isletLocal(o,Math.cos(th)*1e-3,Math.sin(th)*1e-3).Rc, x=o.x+Math.cos(th)*Rc*1.02, z=o.z+Math.sin(th)*Rc*1.02; pos.push(x,terrainH(x,z)-0.05,z); }
+  for(let i=0;i<NS;i++){ const th=i/NS*6.283, Rc=isletLocal(o,Math.cos(th)*1e-3,Math.sin(th)*1e-3).Rc, x=o.x+Math.cos(th)*Rc*1.3, z=o.z+Math.sin(th)*Rc*1.3; pos.push(x,terrainH(x,z)-0.05,z); }
   pos.push(o.x,terrainH(o.x,o.z)-0.1,o.z);
   const ring=k=>1+k*NS, nR=F.length+1, bot=1+nR*NS;
   for(let i=0;i<NS;i++){ const j=(i+1)%NS; idx.push(0,ring(0)+j,ring(0)+i); }
@@ -1060,7 +1060,7 @@ function buildIslet(o){
   const P=flat.attributes.position, N=flat.attributes.normal, col=new Float32Array(P.count*3), c=new THREE.Color();
   const sand=C('#ead7a8'), wet=C('#c9b17f'), bas=C('#2e2a30'), bas2=C('#463e44'), moss=C('#5d8a3a'), moss2=C('#7aa84a');
   for(let f=0;f<P.count;f+=3){ const y=(P.getY(f)+P.getY(f+1)+P.getY(f+2))/3+0.31, ny=N.getY(f);
-    if(y<0.02) c.copy(wet); else if(y<0.17&&ny>0.6) c.copy(sand); else if(ny<0.62) c.copy(hash1(f+o.s)<0.5?bas:bas2); else c.copy(hash1(f*1.3+o.s)<0.5?moss:moss2);
+    if(y<-0.08) c.copy(bas).lerp(wet,0.15); else if(y<0.02) c.copy(wet); else if(y<0.17&&ny>0.6) c.copy(sand); else if(ny<0.62) c.copy(hash1(f+o.s)<0.5?bas:bas2); else c.copy(hash1(f*1.3+o.s)<0.5?moss:moss2);
     for(let k=0;k<3;k++){ col[(f+k)*3]=c.r; col[(f+k)*3+1]=c.g; col[(f+k)*3+2]=c.b; } }
   flat.setAttribute('color',new THREE.BufferAttribute(col,3)); flat.userData.indexed=g;
   const m=new THREE.Mesh(flat,applyUnderwater(new THREE.MeshStandardMaterial({vertexColors:true,flatShading:true,roughness:0.95})));
@@ -1116,7 +1116,7 @@ function waveHjs(x,z,t){
 function randOcean(d0,d1,tries){ for(let k=0;k<(tries||400);k++){ const x=(Math.random()-0.5)*(SLAB.w-1.2), z=OCZ+(Math.random()-0.5)*(SLAB.d-1.2); const d=shoreD(x,z); if(d<d0||d>d1) continue; if(islets().some(o=>Math.hypot(x-o.x,z-o.z)<o.R*1.6+0.5)) continue; return [x,z,d]; } return null; }
 function makeWaterSurface(hTex){
   const u={uTime:{value:0},uNight:{value:0},uBass:{value:0},uH:{value:hTex},uSun:{value:new THREE.Vector3(-0.45,0.8,0.42).normalize()},
-    uRip:{value:[0,1,2,3].map(()=>new THREE.Vector4(0,0,-99,0))},uRipG:{value:[0,0,0,0]},uUw:{value:0},uUwFog:{value:new THREE.Color()}};
+    uRip:{value:[0,1,2,3].map(()=>new THREE.Vector4(0,0,-99,0))},uRipG:{value:[0,0,0,0]},uUw:{value:0},uUwFog:{value:new THREE.Color()},uFogN:{value:70},uFogF:{value:520}};
   const g=new THREE.PlaneGeometry(SLAB.w,SLAB.d,Math.round(SLAB.w*4.5),Math.round(SLAB.d*4.5)); g.rotateX(-Math.PI/2);
   // up to four ripple rings (x, z, start time, strength), each optionally glowing at night: taps and beats, never a deforming sea
   const RIP=`uniform vec4 uRip[4]; uniform float uRipG[4];
@@ -1137,7 +1137,7 @@ function makeWaterSurface(hTex){
         vN=normalize(mat3(modelMatrix)*normalize(vec3(-hx/e,1.,-hz/e))); p.y+=h; vH=h;
         vec4 w=modelMatrix*vec4(p,1.); vW=w.xyz; gl_Position=projectionMatrix*viewMatrix*w; }`,
     fragmentShader:NOISE_GLSL+HS+`
-      uniform float uTime,uNight,uBass,uUw; uniform vec3 uSun,uUwFog; varying vec2 vP; varying vec3 vN; varying vec3 vW; varying float vH; varying float vD; varying float vNear;
+      uniform float uTime,uNight,uBass,uUw,uFogN,uFogF; uniform vec3 uSun,uUwFog; varying vec2 vP; varying vec3 vN; varying vec3 vW; varying float vH; varying float vD; varying float vNear;
       ${RIP}
       void main(){
         float depth=-0.31-terr(vP);
@@ -1171,9 +1171,10 @@ function makeWaterSurface(hTex){
         col*=mix(1.,0.42,uNight);
         float bio=uNight*(0.25+uBass*1.1)*smoothstep(0.55,0.88,noise(vP*1.6-uTime*0.3))*far*(1.-smoothstep(22.,32.,length(vP-vec2(0.,${OCZ.toFixed(2)})))); // glows around the island, not the open sea
         col+=vec3(0.1,0.85,1.)*(bio+rp.y*uNight*1.4)+uNight*vec3(0.,0.03,0.07);
-        float a=mix(0.22,0.6,smoothstep(0.05,1.6,depth)); a=mix(a,1.,fres*0.7); a=mix(a,0.85,smoothstep(2.,4.,depth)); a=min(0.9,a+rm*0.12);
+        float a=mix(0.22,0.6,smoothstep(0.05,1.6,depth)); a=mix(a,1.,fres*0.7); a=mix(a,0.85,smoothstep(2.,4.,depth)); a=mix(a,1.,max(smoothstep(5.,9.,depth),1.-vNear)); // open ocean is opaque, so the seabed's far edge never shows a=min(0.9,a+rm*0.12);
         a*=smoothstep(-0.06,0.03,depth);
-        gl_FragColor=vec4(col,max(a,foam*smoothstep(-0.06,0.02,depth)));
+        float fogK=smoothstep(uFogN,uFogF,length(vW-cameraPosition)); col=mix(col,uUwFog,fogK);
+        gl_FragColor=vec4(col,max(mix(a,1.,fogK),foam*smoothstep(-0.06,0.02,depth)));
       }`});
   const me=new THREE.Mesh(g,m); me.position.set(0,-0.31,OCZ); me.renderOrder=2; inner.add(me);
   // the same sea carries on past the detailed area to the horizon, as a light ring of big triangles
@@ -1557,7 +1558,9 @@ const FAR_ISLES=[
 const farWorld={};
 // how far under the waterline the camera is: 0 above, 1 below, blended across the waves so the transition is smooth
 let uwK=0;
-const UW_FOG={day:C('#1f8c9a'),night:C('#10264a')}, _uwc=new THREE.Color();
+const UW_FOG={day:C('#1f8c9a'),night:C('#10264a')}, _uwc=new THREE.Color(), _fogc=new THREE.Color();
+// above water: the island stays crisp, each farther layer gets lighter and bluer, the farthest peaks melt into the horizon
+const FOG_AIR={near:70,far:520};
 const hash1=n=>{ const x=Math.sin(n*127.1)*43758.5453; return x-Math.floor(x); };
 // a closed mesh: apex, rings of jagged jungle slopes, a sand rim, a skirt down below the sea, and a bottom cap.
 // Faces are coloured one by one (sand low down, dark basalt where steep, two jungle greens elsewhere) for a faceted low-poly look.
@@ -1595,8 +1598,7 @@ function buildFarWorld(){
   const sunDir=sun.position.clone().normalize(), U={uNight:{value:0},uTime:{value:0},uSun:{value:sunDir},
     uZen:{value:FAR.zen[0].clone()},uHaze:{value:FAR.haze[0].clone()},uUw:{value:0},uUwCol:{value:new THREE.Color()}};
   farWorld.u=U;
-  // scene fog: only underwater for now (blue-green, close); above water it sits out past everything
-  scene.fog=new THREE.Fog(0xffffff,2000,3000);
+  scene.fog=new THREE.Fog(0xffffff,FOG_AIR.near,FOG_AIR.far);
   // sky dome: follows the camera, drawn first and behind everything
   const sky=new THREE.Mesh(new THREE.SphereGeometry(800,32,16),new THREE.ShaderMaterial({uniforms:U,side:THREE.BackSide,depthWrite:false,depthTest:false,
     vertexShader:'varying vec3 vD; void main(){ vD=normalize((modelMatrix*vec4(position,1.)).xyz-cameraPosition); gl_Position=projectionMatrix*viewMatrix*modelMatrix*vec4(position,1.); }',
@@ -1618,7 +1620,10 @@ function updateFarWorld(T){
   const cp=camera.position, wl=-0.31+waveHjs(cp.x,cp.z,T); uwK=sstep(0.12,-0.12,cp.y-wl);
   _uwc.copy(UW_FOG.day).lerp(UW_FOG.night,night); u.uUw.value=uwK; u.uUwCol.value.copy(_uwc);
   // fog colour is applied after the sRGB encode, so it takes the sRGB value of the same colour
-  scene.fog.color.copy(_uwc).convertLinearToSRGB(); const fk=Math.pow(1-uwK,6); scene.fog.near=2+2000*fk; scene.fog.far=28+3000*fk;
+  // fog colour is mixed in after the sRGB encode, so it takes the sRGB value of the same colour as the sky's horizon
+  _fogc.copy(u.uHaze.value).lerp(_uwc,uwK).convertLinearToSRGB(); scene.fog.color.copy(_fogc);
+  const fk=Math.pow(1-uwK,6); scene.fog.near=2+FOG_AIR.near*fk; scene.fog.far=28+(FOG_AIR.far-28)*fk;
+  if(isl.wu){ isl.wu.uFogN.value=scene.fog.near; isl.wu.uFogF.value=scene.fog.far; }
   if(isl.wu){ isl.wu.uUw.value=uwK; isl.wu.uUwFog.value.copy(scene.fog.color); }
 }
 function init3D(){
@@ -1949,7 +1954,7 @@ function init3D(){
   const sp=new Float32Array(500*3);
   for(let i=0;i<500;i++){ const th=Math.random()*Math.PI*2, ph=Math.random()*1.45, r=700; sp[i*3]=r*Math.sin(ph)*Math.cos(th); sp[i*3+1]=r*Math.cos(ph)-10; sp[i*3+2]=r*Math.sin(ph)*Math.sin(th); }
   const sgm=new THREE.BufferGeometry(); sgm.setAttribute('position',new THREE.BufferAttribute(sp,3));
-  starPts=new THREE.Points(sgm,new THREE.PointsMaterial({color:0xffffff,size:8.5,map:tex,transparent:true,opacity:0,depthWrite:false})); scene.add(starPts);
+  starPts=new THREE.Points(sgm,new THREE.PointsMaterial({color:0xffffff,size:8.5,map:tex,transparent:true,opacity:0,depthWrite:false,fog:false})); scene.add(starPts);
 
   const resize=()=>{ const w=window.innerWidth,h=window.innerHeight; renderer.setPixelRatio(pixelRatio()); renderer.setSize(w,h,false); view.w=w; view.h=h; updateViewTargets(); };
   window.addEventListener('resize',resize); resize();
@@ -2128,7 +2133,7 @@ function update3D(dt,T){
     // collision: if the line from the target out to the camera dips into the island or seabed, pull the camera in
     // (quickly when closing in, gently when it can move back out), then keep it at least 0.3 above the surface
     { const p=camera.position; let lim=cam.r;
-      for(let s=1;s<=12;s++){ const f=s/12, x=cam.tx+(p.x-cam.tx)*f, y=cam.ty+(p.y-cam.ty)*f, z=cam.tz+(p.z-cam.tz)*f; if(y<surfRaw(x,z)+0.3){ lim=cam.r*Math.max(0.12,(s-1)/12); break; } }
+      if(cam.ty>surfRaw(cam.tx,cam.tz)+0.3) for(let s=1;s<=12;s++){ const f=s/12, x=cam.tx+(p.x-cam.tx)*f, y=cam.ty+(p.y-cam.ty)*f, z=cam.tz+(p.z-cam.tz)*f; if(y<surfRaw(x,z)+0.3){ lim=cam.r*Math.max(0.12,(s-1)/12); break; } }
       camColR+=(lim-camColR)*Math.min(1,dt*(lim<camColR?25:3)); const rr=Math.min(cam.r,camColR);
       p.set(cam.tx+(p.x-cam.tx)*rr/cam.r,cam.ty+(p.y-cam.ty)*rr/cam.r,cam.tz+(p.z-cam.tz)*rr/cam.r);
       p.y=Math.max(p.y,surfRaw(p.x,p.z)+0.3); }
