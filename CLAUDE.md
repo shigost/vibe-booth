@@ -15,7 +15,9 @@ Vibe Booth is a gamified 3D EDM/DJ web app by Recklyss Studios, live at https://
 - Avoid Tone.js nodes that need AudioWorklets (Freeverb, JCReverb, PluckSynth, BitCrusher, FeedbackCombFilter). Use `Tone.Reverb`, synth-based plucks, etc.
 - Monophonic Tone synths must be triggered with increasing times.
 - Island: `SLAB`, `islandR`/`RA` (irregular shoreline), `terrainH`, `buildTerrain`, `makeWaterSurface` (shader), `makeLavaShader`, `VOLC`/`VPROF` (volcano), `riverPath`, reef (`coralGeos`, `critterGeos`, `FISH`), plants (`palm`, `banyan`, `breadfruit`, `pago`, `PLANT_BLOCK` keeps plants off the stage and props).
-- Wider world: `buildFarWorld`/`updateFarWorld` (sky dome, open ocean at `FAR.seaY` below the floating slab, haze), `FAR_ISLES` (backdrop islands on the horizon; swap an entry for a real scene when that island becomes visitable).
+- Wider world: the island sits in an endless ocean. `makeWaterSurface` (one shader for the lagoon and the open sea; `perimeterRing` carries sea and seabed to the horizon), `buildFarWorld`/`updateFarWorld` (sky dome, scene fog matched to the sky haze, underwater factor `uwK`), `FAR_ISLES` (closed low-poly peaks on the horizon; swap an entry for a real scene when that island becomes visitable), `islets()`/`buildIslet` (lagoon rocks, part of the ground via `surfRaw`).
+- Underwater: `applyUnderwater` (depth tint + caustics on seabed and reef), Reef camera preset, `uwLP` low-pass on the mix, orbit camera collision in `update3D`.
+- Reactions: the ground never deforms. `squish`/`rumble` are small camera moves scaled by `motionK()` (Comfort mode, Reduce flashing lights, reduced motion); taps go to `waterTap`, `groundTap`, `plantTap` (coconuts), with ripples via `addRipple`.
 - Stage: guma' latte house, booth, round screen (`drawProj`), sail screen (`drawSail`, mandala visuals), lasers, lava vents (flames), crowd (instanced characters).
 - Shigost: `buildShigost`, `updateShigost`, IK in `ik2`, clips via `sgMove('dance'|'jump')`.
 - Game: `MISSIONS`, `LEVELS`, `complete(id)`, `addXP`, coach pill.

@@ -1152,14 +1152,16 @@ function makeWaterSurface(hTex){
         vec3 col=mix(vec3(0.37,0.89,0.86),vec3(0.13,0.71,0.79),smoothstep(0.05,0.7,depth));
         col=mix(col,vec3(0.12,0.5,0.72),smoothstep(0.7,1.8,depth));
         col=mix(col,vec3(0.04,0.25,0.48),smoothstep(1.8,3.6,depth));
-        float rm=reefM(vP)*smoothstep(0.4,1.2,depth); col=mix(col,vec3(0.05,0.3,0.45),rm*0.5);
+        float rm=vNear>0.01?reefM(vP)*smoothstep(0.4,1.2,depth):0.; col=mix(col,vec3(0.05,0.3,0.45),rm*0.5);
         float far=1.-smoothstep(60.,260.,length(vW-cameraPosition));
         vec3 n=normalize(vN), v=normalize(cameraPosition-vW), hh=normalize(uSun+v);
-        { vec2 q=vP*0.4+vec2(uTime*0.06,uTime*0.04); float d0=noise(q), nx=noise(q+vec2(0.6,0.))-d0, nz=noise(q+vec2(0.,0.6))-d0; n=normalize(n+vec3(-nx,0.,-nz)*0.35*(1.-vNear)*(0.3+0.7*far)); }
+        if(vNear<0.999){ vec2 q=vP*0.4+vec2(uTime*0.06,uTime*0.04); float d0=noise(q), nx=noise(q+vec2(0.6,0.))-d0, nz=noise(q+vec2(0.,0.6))-d0; n=normalize(n+vec3(-nx,0.,-nz)*0.35*(1.-vNear)*(0.3+0.7*far)); }
         float diff=clamp(dot(n,uSun),0.,1.), spec=pow(max(dot(n,hh),0.),110.)*(1.-uNight*0.85), fres=pow(1.-max(dot(n,v),0.),3.);
         col=col*(0.74+0.36*diff)+spec*1.3;
         // at grazing angles the sea mirrors the sky
         col=mix(col,vec3(0.72,0.86,0.96)*mix(1.,0.3,uNight),fres*0.6);
+        float camD=length(vW-cameraPosition), fogK=smoothstep(uFogN,uFogF,camD);
+        if(vNear<0.01){ col*=mix(1.,0.42,uNight); col+=uNight*vec3(0.,0.03,0.07); gl_FragColor=vec4(mix(col,uUwFog,fogK),1.); return; }
         float fn=noise(vP*3.2+vec2(uTime*0.35,uTime*0.22));
         float lap=0.16+0.1*sin(uTime*1.5+vP.x*0.45+vP.y*0.35);
         float shore=1.-smoothstep(0.,lap,depth);
@@ -1169,11 +1171,11 @@ function makeWaterSurface(hTex){
         col=mix(col,vec3(0.97,1.,1.),foam);
         float iri=0.05*sin(vP.x*0.8+vP.y*0.6+uTime*0.7); col+=vec3(iri,-iri*0.5,iri*1.2)*smoothstep(0.8,2.,depth)*far;
         col*=mix(1.,0.42,uNight);
-        float bio=uNight*(0.25+uBass*1.1)*smoothstep(0.55,0.88,noise(vP*1.6-uTime*0.3))*far*(1.-smoothstep(22.,32.,length(vP-vec2(0.,${OCZ.toFixed(2)})))); // glows around the island, not the open sea
+        float bio=uNight<0.01?0.:uNight*(0.25+uBass*1.1)*smoothstep(0.55,0.88,noise(vP*1.6-uTime*0.3))*far*(1.-smoothstep(17.,24.,length(vP-vec2(0.,${OCZ.toFixed(2)})))); // glows around the island, not the open sea
         col+=vec3(0.1,0.85,1.)*(bio+rp.y*uNight*1.4)+uNight*vec3(0.,0.03,0.07);
         float a=mix(0.22,0.6,smoothstep(0.05,1.6,depth)); a=mix(a,1.,fres*0.7); a=mix(a,0.85,smoothstep(2.,4.,depth)); a=mix(a,1.,max(smoothstep(5.,9.,depth),1.-vNear)); // open ocean is opaque, so the seabed's far edge never shows a=min(0.9,a+rm*0.12);
         a*=smoothstep(-0.06,0.03,depth);
-        float fogK=smoothstep(uFogN,uFogF,length(vW-cameraPosition)); col=mix(col,uUwFog,fogK);
+        col=mix(col,uUwFog,fogK);
         gl_FragColor=vec4(col,max(mix(a,1.,fogK),foam*smoothstep(-0.06,0.02,depth)));
       }`});
   const me=new THREE.Mesh(g,m); me.position.set(0,-0.31,OCZ); me.renderOrder=2; inner.add(me);
@@ -1268,7 +1270,7 @@ function applyUnderwater(m){ const prev=m.onBeforeCompile;
       'float uwCaus(vec2 p,float t){ vec2 q=p*1.3; float c=0.; for(int i=0;i<3;i++){ q+=vec2(sin(q.y*1.3+t*0.8),cos(q.x*1.1-t*0.6))*0.5; c+=abs(sin(q.x+q.y*0.7+t*0.5)); q=q*1.6+vec2(1.7,9.2); } return pow(max(0.,1.-c*0.38),4.); }\n'+
       sh.fragmentShader
       .replace('#include <color_fragment>','#include <color_fragment>\n float uwD=max(0.,-0.31-vUwP.y); diffuseColor.rgb*=mix(vec3(1.),mix(vec3(0.42,0.88,0.92),vec3(0.16,0.44,0.74),smoothstep(0.8,4.,uwD)),smoothstep(0.,0.3,uwD));')
-      .replace('#include <emissivemap_fragment>','#include <emissivemap_fragment>\n totalEmissiveRadiance+=vec3(0.8,1.,0.95)*uwCaus(vUwP.xz,uUwT)*smoothstep(0.03,0.3,uwD)*(1.-smoothstep(2.,7.,uwD))*uUwDay*0.55;');
+      .replace('#include <emissivemap_fragment>','#include <emissivemap_fragment>\n if(uwD>0.03&&uwD<7.&&uUwDay>0.05) totalEmissiveRadiance+=vec3(0.8,1.,0.95)*uwCaus(vUwP.xz,uUwT)*smoothstep(0.03,0.3,uwD)*(1.-smoothstep(2.,7.,uwD))*uUwDay*0.55;');
   };
   m.customProgramCacheKey=()=>'uw|'+(prev?prev.toString():'');
   return m;
