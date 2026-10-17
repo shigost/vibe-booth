@@ -964,9 +964,9 @@ function softBodyMat(env){
     sh.vertexShader='varying vec3 vFab;\n'+sh.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\n vFab=position;');
     sh.fragmentShader='varying vec3 vFab;\nfloat fabH(vec3 p){ float k=150.; return 0.5*sin(p.y*k)+0.5*sin((p.x+p.z)*k*0.71+sin(p.y*k*0.5)*1.3); }\n'+sh.fragmentShader
       // knit bump via screen-space derivatives (like three's bump map), faded out where the pattern is finer than a pixel
-      .replace('#include <normal_fragment_maps>','#include <normal_fragment_maps>\n { float h=fabH(vFab), aa=clamp(1.-length(fwidth(vFab))*60.,0.,1.); vec3 sx=dFdx(-vViewPosition), sy=dFdy(-vViewPosition); vec3 r1=cross(sy,normal), r2=cross(normal,sx); float det=dot(sx,r1); vec3 g=sign(det)*(dFdx(h)*r1+dFdy(h)*r2); normal=normalize(abs(det)*normal-g*0.0012*aa); }')
+      .replace('#include <normal_fragment_maps>','#include <normal_fragment_maps>\n { float fbH=fabH(vFab), fbAA=clamp(1.-length(fwidth(vFab))*60.,0.,1.); vec3 fbSX=dFdx(-vViewPosition), fbSY=dFdy(-vViewPosition); vec3 fbR1=cross(fbSY,normal), fbR2=cross(normal,fbSX); float fbDet=dot(fbSX,fbR1); vec3 fbG=sign(fbDet)*(dFdx(fbH)*fbR1+dFdy(fbH)*fbR2); normal=normalize(abs(fbDet)*normal-fbG*0.0012*fbAA); }')
       // soft knee: light above 0.72x the surface colour rolls off toward 1.3x it, so coloured washes tint but never bloom
-      .replace('#include <output_fragment>','{ vec3 A=diffuseColor.rgb*1.3, K=A*0.72; outgoingLight=mix(outgoingLight,K+(A-K)*(1.-exp(-(outgoingLight-K)/max(A-K,vec3(1e-3)))),step(K,outgoingLight)); }\n#include <output_fragment>');
+      .replace('#include <output_fragment>','{ vec3 fbCap=diffuseColor.rgb*1.3, fbKnee=fbCap*0.72; outgoingLight=mix(outgoingLight,fbKnee+(fbCap-fbKnee)*(1.-exp(-(outgoingLight-fbKnee)/max(fbCap-fbKnee,vec3(1e-3)))),step(fbKnee,outgoingLight)); }\n#include <output_fragment>');
   };
   return m;
 }
