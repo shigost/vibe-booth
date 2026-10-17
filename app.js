@@ -10,6 +10,8 @@ const store={
 };
 const prefersReduced=!!(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches);
 const isMobile=()=>window.matchMedia('(max-width: 820px)').matches;
+// phones render the 3D at 1.5x at most: far fewer pixels than 2-3x, and the GPU/main thread leave room for audio
+const pixelRatio=()=>Math.min(window.devicePixelRatio||1,(isMobile()||window.matchMedia('(pointer: coarse)').matches)?1.5:2);
 
 /* ================= MUSIC DATA ================= */
 const P=s=>s.split('').map(c=>c==='x'?1:'1234'.includes(c)?+c:0);
@@ -193,10 +195,17 @@ let vibe=0, ambLevel=0.5;
 function addVibe(n){ vibe=clamp(vibe+n,0,100); if(vibe>=80) complete('crowd'); }
 
 /* ================= AUDIO ================= */
-let audioReady=false, cross, echo, verb, master, limiter, analyser, riserNoise, riserFilter, riserGain, roll, clock;
+let audioReady=false, cross, revCross, roomVerb, echo, verb, verbSend, master, limiter, analyser, riserNoise, riserFilter, riserGain, roll, clock;
 let globalStep=0, echoOn=false, verbOn=false, riserActive=false, buildHype=false, lastDrop=-1e9, xfVal=0.5, xfSide=null;
-const decks={}; let phaser, gateG, phaserOn=false, gateOn=false, amb=null; const GATE=P('x.x.xx.x.x.xx.x.');
+const decks={}; let phaser, gateG, phaserOn=false, gateOn=false, amb=null, ambVerb=null; const GATE=P('x.x.xx.x.x.xx.x.');
 /* ---------- sound design: each deck builds the voices its kit needs ---------- */
+// A monophonic Tone source can't start before an event it already has booked (Tone throws "The time must be greater
+// than or equal to the last scheduled time"). For triggers made outside the sequencer, monoAt returns the earliest legal
+// time at or after t and books the note's last event: attack+decay with sustain 0 (the later release stop is ignored), else dur+release.
+function monoAt(syn,t,dur){
+  const e=syn.envelope, tail=e.sustain===0?e.toSeconds(e.attack)+e.toSeconds(e.decay):dur+e.toSeconds(e.release);
+  const t0=Math.max(t,(syn._monoEnd||0)+1e-4); syn._monoEnd=t0+tail; return t0;
+}
 function mkClick(d,vol){ const n=new Tone.NoiseSynth({noise:{type:'white'},envelope:{attack:0.001,decay:0.012,sustain:0}}); const hp=new Tone.Filter(3000,'highpass'); n.chain(hp,d.drums); n.volume.value=vol; return t=>n.triggerAttackRelease(0.01,t); }
 const VOICES={
   kick:{
@@ -240,20 +249,20 @@ const VOICES={
       const lfo=new Tone.LFO({frequency:4,min:110,max:3800,type:'sine'}).start(); lfo.connect(f.frequency);
       const w=new Tone.MonoSynth({oscillator:{type:'fatsawtooth',count:2,spread:22},envelope:{attack:0.004,decay:0.1,sustain:0.95,release:0.05},filterEnvelope:{baseFrequency:8000,octaves:0}}).connect(f); w.volume.value=-8;
       const sub=new Tone.MonoSynth({oscillator:{type:'sine'},envelope:{attack:0.004,decay:0.1,sustain:0.9,release:0.06},filterEnvelope:{baseFrequency:2000,octaves:0}}).connect(d.sc); sub.volume.value=-9;
-      return (t,m,val,bar)=>{ const bps=Tone.Transport.bpm.value/60; const rate=val===2?bps*4:(bar%2?bps*3:bps*2);
+      return (t,m,val,bar)=>{ const bps=Tone.getTransport().bpm.value/60; const rate=val===2?bps*4:(bar%2?bps*3:bps*2);
         lfo.frequency.setValueAtTime(rate,t); w.triggerAttackRelease(mtof(m+12),'8n',t); sub.triggerAttackRelease(mtof(m),'8n',t); }; }
   },
   chords:{
     piano:d=>{ const g=new Tone.Gain(1); g.connect(d.sc); g.connect(d.rev);
-      const p=new Tone.PolySynth(Tone.FMSynth,{harmonicity:3,modulationIndex:2.2,oscillator:{type:'sine'},modulation:{type:'sine'},envelope:{attack:0.004,decay:1.4,sustain:0.08,release:0.9},modulationEnvelope:{attack:0.002,decay:0.5,sustain:0,release:0.4}}).connect(g);
-      p.maxPolyphony=16; p.volume.value=-12; d.rel.push(()=>p.releaseAll());
+      const p=new Tone.PolySynth(Tone.FMSynth,{harmonicity:3,modulationIndex:2.2,oscillator:{type:'sine'},modulation:{type:'sine'},envelope:{attack:0.004,decay:1.4,sustain:0.08,release:0.35},modulationEnvelope:{attack:0.002,decay:0.5,sustain:0,release:0.4}}).connect(g);
+      p.maxPolyphony=24; p.volume.value=-12; d.rel.push(()=>p.releaseAll());
       return (t,ch)=>p.triggerAttackRelease(ch.notes.map(n=>mtof(n+12)),'8n',t,0.7+Math.random()*0.2); },
     supersaw:d=>{ const f=new Tone.Filter(5200,'lowpass'); f.connect(d.sc); const s=new Tone.Gain(0.6).connect(d.rev); f.connect(s);
-      const p=new Tone.PolySynth(Tone.Synth,{oscillator:{type:'fatsawtooth',count:3,spread:30},envelope:{attack:0.005,decay:0.25,sustain:0.3,release:0.3}}).connect(f); p.volume.value=-20; d.rel.push(()=>p.releaseAll());
+      const p=new Tone.PolySynth(Tone.Synth,{oscillator:{type:'fatsawtooth',count:3,spread:30},envelope:{attack:0.005,decay:0.25,sustain:0.3,release:0.3}}).connect(f); p.maxPolyphony=20; p.volume.value=-20; d.rel.push(()=>p.releaseAll());
       return (t,ch)=>p.triggerAttackRelease(ch.notes.map(mtof),'8n',t,0.8); },
-    organ:d=>{ const p=new Tone.PolySynth(Tone.Synth,{oscillator:{type:'square4'},envelope:{attack:0.003,decay:0.22,sustain:0.08,release:0.15}}).connect(d.sc); p.volume.value=-19; d.rel.push(()=>p.releaseAll()); return (t,ch)=>p.triggerAttackRelease(ch.notes.map(mtof),'16n',t,0.8); },
-    pluck:d=>{ const f=new Tone.Filter(3200,'lowpass').connect(d.sc); const p=new Tone.PolySynth(Tone.Synth,{oscillator:{type:'square'},envelope:{attack:0.002,decay:0.14,sustain:0,release:0.12}}).connect(f); p.volume.value=-22; d.rel.push(()=>p.releaseAll()); return (t,ch)=>p.triggerAttackRelease(ch.notes.map(mtof),'16n',t,0.8); },
-    guitar:d=>{ const g=gtrChain(d,0.2); const p=new Tone.PolySynth(Tone.MonoSynth,GTR).connect(g); p.volume.value=-8; d.rel.push(()=>p.releaseAll());
+    organ:d=>{ const p=new Tone.PolySynth(Tone.Synth,{oscillator:{type:'square4'},envelope:{attack:0.003,decay:0.22,sustain:0.08,release:0.15}}).connect(d.sc); p.maxPolyphony=8; p.volume.value=-19; d.rel.push(()=>p.releaseAll()); return (t,ch)=>p.triggerAttackRelease(ch.notes.map(mtof),'16n',t,0.8); },
+    pluck:d=>{ const f=new Tone.Filter(3200,'lowpass').connect(d.sc); const p=new Tone.PolySynth(Tone.Synth,{oscillator:{type:'square'},envelope:{attack:0.002,decay:0.14,sustain:0,release:0.12}}).connect(f); p.maxPolyphony=8; p.volume.value=-22; d.rel.push(()=>p.releaseAll()); return (t,ch)=>p.triggerAttackRelease(ch.notes.map(mtof),'16n',t,0.8); },
+    guitar:d=>{ const g=gtrChain(d,0.2); const p=new Tone.PolySynth(Tone.MonoSynth,GTR).connect(g); p.maxPolyphony=14; p.volume.value=-8; d.rel.push(()=>p.releaseAll());
       return (t,ch)=>{ const r=ch.bass+12; [r,r+7,r+12].forEach((n,i)=>p.triggerAttackRelease(mtof(n),'8n',t+i*0.009,0.9)); }; }
   },
   vox:{
@@ -310,12 +319,12 @@ const VOICES_EXTRA={
   },
   pad:{
     pad:d=>{ const ch=new Tone.Chorus(3,3.5,0.6).start(); const lp=new Tone.Filter(2200,'lowpass'); lp.connect(ch); ch.connect(d.sc); const s=new Tone.Gain(0.8).connect(d.rev); ch.connect(s);
-      const p=new Tone.PolySynth(Tone.Synth,{oscillator:{type:'fatsawtooth',count:3,spread:28},envelope:{attack:0.6,decay:1.0,sustain:0.7,release:1.8}}).connect(lp); p.maxPolyphony=12; p.volume.value=-24; d.rel.push(()=>p.releaseAll());
+      const p=new Tone.PolySynth(Tone.Synth,{oscillator:{type:'fatsawtooth',count:3,spread:28},envelope:{attack:0.6,decay:1.0,sustain:0.7,release:1.8}}).connect(lp); p.maxPolyphony=10; p.volume.value=-24; d.rel.push(()=>p.releaseAll());
       return (t,ch2,dur,v)=>p.triggerAttackRelease(ch2.notes.map(n=>mtof(n+12)),dur,t,v); }
   },
   fx:{
-    riser:d=>{ const n=new Tone.Noise('white'); const f=new Tone.Filter({type:'highpass',frequency:300,Q:2}); const g=new Tone.Gain(0); n.chain(f,g,d.input); n.start();
-      return (t,dur)=>{ f.frequency.cancelScheduledValues(t); f.frequency.setValueAtTime(250,t); f.frequency.exponentialRampToValueAtTime(8500,t+dur);
+    riser:d=>{ const n=new Tone.Noise('white'); const f=new Tone.Filter({type:'highpass',frequency:300,Q:2}); const g=new Tone.Gain(0); n.chain(f,g,d.input);
+      return (t,dur)=>{ n.start(t); n.stop(t+dur+0.05); f.frequency.cancelScheduledValues(t); f.frequency.setValueAtTime(250,t); f.frequency.exponentialRampToValueAtTime(8500,t+dur);
         g.gain.cancelScheduledValues(t); g.gain.setValueAtTime(0.0001,t); g.gain.linearRampToValueAtTime(0.16,t+dur); g.gain.setValueAtTime(0,t+dur+0.02); }; },
     crash:d=>{ const hp=new Tone.Filter(4500,'highpass'); hp.connect(d.drums); hp.connect(d.rev); const n=new Tone.NoiseSynth({noise:{type:'white'},envelope:{attack:0.001,decay:1.6,sustain:0}}).connect(hp); n.volume.value=-19; return t=>n.triggerAttackRelease(1.2,t,0.9); },
     impact:d=>{ const k=new Tone.MembraneSynth({pitchDecay:0.25,octaves:5,envelope:{attack:0.001,decay:1.4,sustain:0}}).connect(d.drums); k.volume.value=-6; const lp=new Tone.Filter(300,'lowpass'); lp.connect(d.rev); const n=new Tone.NoiseSynth({noise:{type:'brown'},envelope:{attack:0.001,decay:0.9,sustain:0}}).connect(lp); n.volume.value=-6; return t=>{ k.triggerAttackRelease('A0','2n',t); n.triggerAttackRelease(0.8,t); }; },
@@ -339,10 +348,10 @@ VOICES.vox.chop=d=>{ const out=new Tone.Gain(2.0); out.connect(d.sc); out.connec
     s.triggerAttackRelease(fr*0.97,dur,t,0.9); s.frequency.setValueAtTime(fr*0.97,t+0.001); s.frequency.exponentialRampToValueAtTime(fr,t+0.05); br.triggerAttackRelease(0.05,t,0.7); }; };
 // wider supersaw with chorus
 VOICES.chords.supersaw=d=>{ const f=new Tone.Filter(5400,'lowpass'); const ch=new Tone.Chorus(2.5,3,0.5).start(); f.connect(ch); ch.connect(d.sc); const s=new Tone.Gain(0.6).connect(d.rev); ch.connect(s);
-  const p=new Tone.PolySynth(Tone.Synth,{oscillator:{type:'fatsawtooth',count:4,spread:36},envelope:{attack:0.005,decay:0.25,sustain:0.3,release:0.3}}).connect(f); p.volume.value=-21; d.rel.push(()=>p.releaseAll());
+  const p=new Tone.PolySynth(Tone.Synth,{oscillator:{type:'fatsawtooth',count:4,spread:36},envelope:{attack:0.005,decay:0.25,sustain:0.3,release:0.3}}).connect(f); p.maxPolyphony=20; p.volume.value=-21; d.rel.push(()=>p.releaseAll());
   return (t,ch2)=>p.triggerAttackRelease(ch2.notes.map(mtof),'8n',t,0.8); };
 class Deck{
-  constructor(id,dest){
+  constructor(id,dest,revDest){
     this.id=id; this.track=null; this.trackVal=null; this.playing=false; this.pending=false; this.pos=0;
     this.lowVal=0; this.wasCut=false; this.filterVal=0; this.filterBig=false;
     this.jump=null; this.loop=null; this.roll=null; this.startBar=0; this.sec=null;
@@ -355,8 +364,12 @@ class Deck{
     this.input.chain(this.arrHP,this.arrLP,this.arrGain,this.eq,this.filter,this.fader,dest); this.fader.connect(this.meter);
     this.drums=new Tone.Gain(1).connect(this.input);
     this.sc=new Tone.Gain(1).connect(this.input);
-    this.verb=new Tone.Reverb({decay:2.4,preDelay:0.01}); this.verb.wet.value=1; this.verb.connect(this.input);
-    this.rev=new Tone.Gain(0.28).connect(this.verb);
+    // reverb send into the shared room reverb (initAudio). Cheap copies of the arrangement filters, DJ filter, and fader
+    // keep the tail following this deck the way the dry signal does.
+    this.rev=new Tone.Gain(0.28);
+    this.revHP=new Tone.Filter({type:'highpass',frequency:10,Q:0.9}); this.revLP=new Tone.Filter({type:'lowpass',frequency:20000,Q:0.9});
+    this.revFilter=new Tone.Filter({type:'lowpass',frequency:20000,Q:1.4}); this.revFader=new Tone.Gain(0.8);
+    this.rev.chain(this.revHP,this.revLP,this.revFilter,this.revFader,revDest);
     this.v={}; this.rel=[];
   }
   voice(part,name){ const key=part+':'+name; if(!this.v[key]){ try{ this.v[key]=VOICES[part][name](this); }catch(e){ console.warn('voice failed',key,e); this.v[key]=()=>{}; } } return this.v[key]; }
@@ -364,21 +377,24 @@ class Deck{
   duck(t,amt){ const g=this.sc.gain; g.cancelScheduledValues(t); g.setValueAtTime(1-amt,t); g.setTargetAtTime(1,t+0.02,0.075); }
   audible(){ const x=this.id==='A'?1-xfVal:xfVal; return this.playing&&x>0.25&&this.fader.gain.value>0.15; }
   onBar(sec,sb,time,absBar){
-    const beat=60/Tone.Transport.bpm.value, barD=beat*4, k=KITS[this.track.kit]||KITS.house;
+    const beat=60/Tone.getTransport().bpm.value, barD=beat*4, k=KITS[this.track.kit]||KITS.house;
     if(sb===0){
-      this.arrLP.frequency.cancelScheduledValues(time); this.arrHP.frequency.cancelScheduledValues(time);
-      if(sec.lp){ this.arrLP.frequency.setValueAtTime(450,time); this.arrLP.frequency.exponentialRampToValueAtTime(19000,time+sec.bars*barD); } else this.arrLP.frequency.setValueAtTime(20000,time);
-      if(sec.build){ this.arrHP.frequency.setValueAtTime(20,time); this.arrHP.frequency.exponentialRampToValueAtTime(650,time+sec.bars*barD-beat); this.voice('fx','riser')(time,sec.bars*barD-beat); }
-      else this.arrHP.frequency.setValueAtTime(10,time);
+      [[this.arrLP,this.arrHP],[this.revLP,this.revHP]].forEach(([lp,hp])=>{
+        lp.frequency.cancelScheduledValues(time); hp.frequency.cancelScheduledValues(time);
+        if(sec.lp){ lp.frequency.setValueAtTime(450,time); lp.frequency.exponentialRampToValueAtTime(19000,time+sec.bars*barD); } else lp.frequency.setValueAtTime(20000,time);
+        if(sec.build){ hp.frequency.setValueAtTime(20,time); hp.frequency.exponentialRampToValueAtTime(650,time+sec.bars*barD-beat); }
+        else hp.frequency.setValueAtTime(10,time);
+      });
+      if(sec.build) this.voice('fx','riser')(time,sec.bars*barD-beat);
       this.arrGain.gain.cancelScheduledValues(time); this.arrGain.gain.setValueAtTime(1,time);
       if(sec.drop){ this.voice('fx','crash')(time); this.voice('fx','impact')(time); if(k.horn) this.voice('fx','kulo')(time,chordFor(this.track,0).bass+24,barD*1.5); }
-      const s=sec, d=this; Tone.Draw.schedule(()=>sectionChanged(d,s),time);
+      const s=sec, d=this; Tone.getDraw().schedule(()=>sectionChanged(d,s),time);
     } else if(sec.drop&&sb%8===0) this.voice('fx','crash')(time);
     if(sec.build&&sb===sec.bars-1){ const tp=time+3*beat; this.arrGain.gain.setValueAtTime(1,tp-0.002); this.arrGain.gain.linearRampToValueAtTime(0,tp+0.01); this.arrGain.gain.setValueAtTime(1,time+barD); }
-    const sbv=sb, d=this; Tone.Draw.schedule(()=>deckMeta(d,sec,sbv),time);
+    const sbv=sb, d=this; Tone.getDraw().schedule(()=>deckMeta(d,sec,sbv),time);
   }
   tick(step,time){
-    if(this.pending&&step===0){ this.pending=false; this.playing=true; this.pos=(this.startBar||0)*16; this.startBar=0; Tone.Draw.schedule(()=>deckUI(this),time); }
+    if(this.pending&&step===0){ this.pending=false; this.playing=true; this.pos=(this.startBar||0)*16; this.startBar=0; Tone.getDraw().schedule(()=>deckUI(this),time); }
     if(!this.playing||!this.track) return;
     if(step===0){
       if(this.jump!=null){ this.pos=this.jump*16; this.jump=null; if(this.loop) this.loop.start=Math.floor(this.pos/64)*4; }
@@ -387,11 +403,11 @@ class Deck{
     const t=this.track, k=KITS[t.kit]||KITS.house, absBar=Math.floor(this.pos/16), [sec,sb]=sectionAt(absBar), bar=absBar%4; this.pos++;
     if(step===0) this.onBar(sec,sb,time,absBar);
     let st=step; if(this.roll){ if(this.roll.start==null){ this.roll.start=step-step%this.roll.len; this.roll.i=0; } st=this.roll.start+(this.roll.i++%this.roll.len); }
-    const six=60/Tone.Transport.bpm.value/4, tt=time+(st%2?(t.swing||0)*six:0)+(Math.random()-0.5)*0.003;
+    const six=60/Tone.getTransport().bpm.value/4, tt=time+(st%2?(t.swing||0)*six:0)+(Math.random()-0.5)*0.003;
     const on=n=>sec.on.has(n), hum=()=>0.82+Math.random()*0.18;
     const lastTwo=sec.build&&sb>=sec.bars-2, pauseBeat=sec.build&&sb===sec.bars-1&&step>=12;
     if(pauseBeat) return;
-    if((on('kick')||(on('kickb')&&!lastTwo))&&t.kick[st]){ this.voice('kick',k.kick)(tt,1); this.duck(tt,k.duck); Tone.Draw.schedule(()=>onKick(),tt); }
+    if((on('kick')||(on('kickb')&&!lastTwo))&&t.kick[st]){ this.voice('kick',k.kick)(tt,1); this.duck(tt,k.duck); Tone.getDraw().schedule(()=>onKick(),tt); }
     if(lastTwo&&on('clap')){ const rate=sb===sec.bars-1?1:2; if(step%rate===0){ const p=((sb-(sec.bars-2))*16+step)/32; this.voice('snare',k.snare)(tt,(0.25+0.7*p)*(k.snare==='big'?0.55:1)); } }
     else if(on('clap')&&t.clap[st]) this.voice('snare',k.snare)(tt,0.95);
     else if(sec.drop&&k.fill&&(sb%8===7)&&step>=13) this.voice('snare',k.snare)(tt,0.35+(step-12)*0.17);
@@ -406,7 +422,7 @@ class Deck{
     if(wantS) this.voice('chords',k.chords)(tt,ch);
     if(wantV){ const nx=t.vox[(st+1)%16], dur=nx?six*0.9:six*1.8, vf=this.voice('vox',k.vox); vf(tt,ch,t.vox[st],st,bar,dur); if(sec.drop&&Math.random()<0.15) vf(tt+six*0.5,ch,t.vox[st],st,bar,six*0.4); }
   }
-  stop(){ this.playing=false; this.pending=false; this.loop=null; this.roll=null; this.jump=null; this.rel.forEach(f=>f()); this.arrGain.gain.cancelScheduledValues(0); this.arrGain.gain.value=1; this.arrHP.frequency.cancelScheduledValues(0); this.arrHP.frequency.value=10; this.arrLP.frequency.cancelScheduledValues(0); this.arrLP.frequency.value=20000; }
+  stop(){ this.playing=false; this.pending=false; this.loop=null; this.roll=null; this.jump=null; this.rel.forEach(f=>f()); this.arrGain.gain.cancelScheduledValues(0); this.arrGain.gain.value=1; [this.arrHP,this.revHP].forEach(f=>{ f.frequency.cancelScheduledValues(0); f.frequency.value=10; }); [this.arrLP,this.revLP].forEach(f=>{ f.frequency.cancelScheduledValues(0); f.frequency.value=20000; }); }
 }
 function deckMeta(d,sec,sb){ if(!d.playing) return; const pill=$('#p'+d.id); pill.querySelector('.dkMeta').textContent=sec.n+', bar '+(sb+1)+' of '+sec.bars+(d.loop?' (looping)':''); }
 function sectionChanged(d,sec){
@@ -420,15 +436,21 @@ function sectionChanged(d,sec){
 const anyPlaying=()=>!!(decks.A&&(decks.A.playing||decks.B.playing));
 const otherDeck=d=>d.id==='A'?decks.B:decks.A;
 function initAudio(){
-  cross=new Tone.CrossFade(0.5);
+  cross=new Tone.CrossFade(0.5); revCross=new Tone.CrossFade(0.5);
   echo=new Tone.FeedbackDelay({delayTime:0.36,feedback:0.42,wet:0});
-  verb=new Tone.Reverb({decay:3.5,preDelay:0.02}); verb.wet.value=0;
+  // only two convolvers in the whole app: the room every deck (and the island chimes) sends into,
+  // and the Reverb button's bigger hall as a send, so it costs nothing extra while off
+  roomVerb=new Tone.Reverb({decay:2.4,preDelay:0.01}); roomVerb.wet.value=1;
+  verb=new Tone.Reverb({decay:3.5,preDelay:0.02}); verb.wet.value=1; verbSend=new Tone.Gain(0);
   master=new Tone.Gain(0.9); limiter=new Tone.Limiter(-1);
   const glue=new Tone.Compressor({threshold:-16,ratio:3,attack:0.01,release:0.2});
   phaser=new Tone.Phaser({frequency:0.35,octaves:3,baseFrequency:380}); phaser.wet.value=0; gateG=new Tone.Gain(1);
-  cross.chain(echo,verb,phaser,gateG,master,glue,limiter,Tone.Destination);
+  const bus=new Tone.Gain(1);
+  cross.connect(echo); revCross.chain(roomVerb,echo);
+  echo.connect(bus); echo.chain(verbSend,verb,bus);
+  bus.chain(phaser,gateG,master,glue,limiter,Tone.getDestination());
   analyser=new Tone.Analyser('fft',64); limiter.connect(analyser);
-  decks.A=new Deck('A',cross.a); decks.B=new Deck('B',cross.b);
+  decks.A=new Deck('A',cross.a,revCross.a); decks.B=new Deck('B',cross.b,revCross.b);
   riserFilter=new Tone.Filter({type:'highpass',frequency:300,Q:2}); riserGain=new Tone.Gain(0); riserNoise=new Tone.Noise('white');
   riserNoise.chain(riserFilter,riserGain,echo);
   const rollF=new Tone.Filter(2200,'bandpass'); rollF.connect(echo);
@@ -438,7 +460,7 @@ function initAudio(){
     try{ decks.A.tick(step,time); }catch(e){ console.warn(e); } try{ decks.B.tick(step,time); }catch(e){ console.warn(e); }
     if(gateOn) gateG.gain.setValueAtTime(GATE[step]?1:0.1,time);
     const playing=decks.A.playing||decks.B.playing;
-    Tone.Draw.schedule(()=>{ onStep(step,playing); if(step%4===0&&playing) onBeat(step===0); },time);
+    Tone.getDraw().schedule(()=>{ onStep(step,playing); if(step%4===0&&playing) onBeat(step===0); },time);
     globalStep++;
   },'16n').start(0);
   audioReady=true;
@@ -453,19 +475,20 @@ function startAmbience(){
   new Tone.LFO(0.085,0.12,0.95).start().connect(swell.gain); ocean.chain(oF,swell,pan,amb); ocean.volume.value=-9; ocean.start();
   const surf=new Tone.Noise('pink'), sF=new Tone.Filter({type:'bandpass',frequency:2200,Q:0.5}), sG=new Tone.Gain(0);
   new Tone.LFO({frequency:0.085,min:0,max:0.32,phase:90}).start().connect(sG.gain); surf.chain(sF,sG,amb); surf.volume.value=-17; surf.start();
-  const chime=new Tone.PolySynth(Tone.FMSynth,{harmonicity:3.5,modulationIndex:5,envelope:{attack:0.002,decay:1.8,sustain:0,release:1.2},modulationEnvelope:{attack:0.002,decay:0.5,sustain:0,release:0.4}}); chime.volume.value=-30;
-  const cv=new Tone.Reverb({decay:4,preDelay:0.03}); cv.wet.value=0.6; chime.chain(cv,amb);
+  const chime=new Tone.PolySynth(Tone.FMSynth,{harmonicity:3.5,modulationIndex:5,envelope:{attack:0.002,decay:1.8,sustain:0,release:1.2},modulationEnvelope:{attack:0.002,decay:0.5,sustain:0,release:0.4}}); chime.maxPolyphony=10; chime.volume.value=-30;
+  // dry to the ambience bus, wet through the shared room reverb (its level follows amb in the frame loop)
+  const cDry=new Tone.Gain(0.6); chime.chain(cDry,amb); ambVerb=new Tone.Gain(0); chime.chain(ambVerb,roomVerb);
   const crack=new Tone.NoiseSynth({noise:{type:'white'},envelope:{attack:0.001,decay:0.008,sustain:0}}), cF=new Tone.Filter({type:'bandpass',frequency:3200,Q:1.5}); crack.chain(cF,amb); crack.volume.value=-26;
   const notes=['D5','E5','G5','A5','B5','D6','E6'];
   setInterval(()=>{ if(!amb) return; const now=Tone.now();
-    if(Math.random()<0.1){ const n=1+Math.floor(Math.random()*3); for(let k=0;k<n;k++) chime.triggerAttackRelease(notes[Math.floor(Math.random()*notes.length)],'8n',now+0.05+k*0.09+Math.random()*0.05,0.4+Math.random()*0.4); }
-    const er=(isl&&isl.erupt)||0, rate=0.25+er*0.5; if(Math.random()<rate){ const n=1+Math.floor(Math.random()*(er>0?6:3)); const ts=[...Array(n)].map(()=>now+0.05+Math.random()*0.2).sort((a,b)=>a-b); ts.forEach((tc,k)=>crack.triggerAttackRelease(0.006,tc+k*0.012,0.3+Math.random()*0.7)); }
+    if(Math.random()<0.1){ const n=Math.min(1+Math.floor(Math.random()*3),7-chime.activeVoices); for(let k=0;k<n;k++) chime.triggerAttackRelease(notes[Math.floor(Math.random()*notes.length)],'8n',now+0.05+k*0.09+Math.random()*0.05,0.4+Math.random()*0.4); }
+    const er=(isl&&isl.erupt)||0, rate=0.25+er*0.5; if(Math.random()<rate){ const n=1+Math.floor(Math.random()*(er>0?6:3)); const ts=[...Array(n)].map(()=>now+0.05+Math.random()*0.2).sort((a,b)=>a-b); ts.forEach((tc,k)=>{ const t=monoAt(crack,tc+k*0.012,0.006); crack.triggerAttackRelease(0.006,t,0.3+Math.random()*0.7); }); }
   },250);
 }
 
 function setBPM(b){
   b=Math.round(b);
-  if(audioReady){ Tone.Transport.bpm.value=b; echo.delayTime.rampTo(60/b*0.75,0.05); }
+  if(audioReady){ Tone.getTransport().bpm.value=b; echo.delayTime.rampTo(60/b*0.75,0.05); }
   $('#bpmVal').textContent=b; $('#tempo').value=b; $('#tempoVal').textContent=b;
 }
 function togglePlay(d){
@@ -474,7 +497,7 @@ function togglePlay(d){
   if(d.playing||d.pending){ d.stop(); deckUI(d); $('#chan'+d.id+' .loopBtn').classList.remove('on'); $$('#chan'+d.id+' .cue').forEach(b=>b.classList.remove('now')); if(echoOn) complete('echo'); return; }
   const o=otherDeck(d);
   if(!(o.playing||o.pending)) setBPM(d.track.bpm);
-  if(Tone.Transport.state!=='started'){ globalStep=0; Tone.Transport.start('+0.06'); }
+  if(Tone.getTransport().state!=='started'){ globalStep=0; Tone.getTransport().start('+0.06'); }
   d.pending=true; deckUI(d);
   complete('play');
   if(o.playing&&(o.id==='A'?xfVal<0.12:xfVal>0.88)) complete('prep');
@@ -531,14 +554,13 @@ function setFilter(d,v){
   if(!audioReady) return;
   if(Math.abs(v)<0.05) v=0;
   d.filterVal=v;
-  if(v===0){ d.filter.type='lowpass'; d.filter.frequency.rampTo(20000,0.05); }
-  else if(v<0){ d.filter.type='lowpass'; d.filter.frequency.rampTo(20000*Math.pow(0.006,-v),0.05); }
-  else { d.filter.type='highpass'; d.filter.frequency.rampTo(20*Math.pow(250,v),0.05); }
+  const type=v>0?'highpass':'lowpass', hz=v===0?20000:v<0?20000*Math.pow(0.006,-v):20*Math.pow(250,v);
+  [d.filter,d.revFilter].forEach(f=>{ f.type=type; f.frequency.rampTo(hz,0.05); });
   if(Math.abs(v)>0.6) d.filterBig=true;
   if(v===0&&d.filterBig&&d.playing){ d.filterBig=false; complete('filter'); addVibe(5); }
 }
 function setXF(v){
-  xfVal=v; if(audioReady) cross.fade.rampTo(v,0.03);
+  xfVal=v; if(audioReady){ cross.fade.rampTo(v,0.03); revCross.fade.rampTo(v,0.03); }
   const side=v<0.08?'A':v>0.92?'B':null;
   if(side&&xfSide&&side!==xfSide&&decks.A.playing&&decks.B.playing){ complete('blend'); addVibe(15); addXP(10); toast('Smooth move. Deck '+side+' has the floor.','good'); }
   if(side) xfSide=side;
@@ -547,25 +569,25 @@ function startRiser(){
   if(!anyPlaying()){ toast('Start a deck first, then build it up','warn'); return; }
   if(riserActive) return;
   riserActive=true; $('#aBuild').classList.add('on');
-  const bar=Tone.Time('1m').toSeconds(), beat=bar/4, t0=Tone.Transport.nextSubdivision('1m');
+  const bar=Tone.Time('1m').toSeconds(), beat=bar/4, t0=Tone.getTransport().nextSubdivision('1m');
   riserNoise.start(t0); riserNoise.stop(t0+2*bar-beat);
   riserFilter.frequency.cancelScheduledValues(t0); riserFilter.frequency.setValueAtTime(250,t0); riserFilter.frequency.exponentialRampToValueAtTime(9000,t0+2*bar-beat);
   riserGain.gain.cancelScheduledValues(t0); riserGain.gain.setValueAtTime(0.001,t0); riserGain.gain.linearRampToValueAtTime(0.45,t0+2*bar-beat); riserGain.gain.setValueAtTime(0,t0+2*bar-beat);
   for(let i=0;i<8;i++) roll.triggerAttackRelease('32n',t0+i*bar/8,0.3+i*0.05);
   for(let i=0;i<12;i++) roll.triggerAttackRelease('32n',t0+bar+i*bar/16,0.65+i*0.03);
-  Tone.Draw.schedule(()=>{buildHype=true;},t0);
+  Tone.getDraw().schedule(()=>{buildHype=true;},t0);
   scheduleDrop(t0+2*bar-beat,t0+2*bar,true);
   toast('Building. The drop lands in 2 bars.');
 }
 function scheduleDrop(tPause,tDrop,fromRiser){
   master.gain.setValueAtTime(0,tPause); master.gain.setValueAtTime(0.9,tDrop);
-  Tone.Draw.schedule(()=>{ sgMove('jump'); },tPause);
-  Tone.Draw.schedule(()=>onDrop(fromRiser),tDrop);
+  Tone.getDraw().schedule(()=>{ sgMove('jump'); },tPause);
+  Tone.getDraw().schedule(()=>onDrop(fromRiser),tDrop);
 }
 function doDrop(){
   if(!anyPlaying()){ toast('Start a deck first','warn'); return; }
   if(riserActive) return;
-  const beat=Tone.Time('4n').toSeconds(), t1=Tone.Transport.nextSubdivision('4n');
+  const beat=Tone.Time('4n').toSeconds(), t1=Tone.getTransport().nextSubdivision('4n');
   scheduleDrop(t1,t1+beat,false);
 }
 function onDrop(fromRiser){
@@ -611,7 +633,9 @@ const pc=projCanvas.getContext('2d');
 const floaters=[...Array(30)].map(()=>({x:Math.random()*PW,y:Math.random()*PH*1.2,s:8+Math.random()*14,v:0.4+Math.random()*1.1,k:Math.random()<0.55,c:Math.floor(Math.random()*4),r:Math.random()*6}));
 const newStar=r=>({x:(Math.random()-0.5)*2,y:(Math.random()-0.5)*2,z:r?Math.random():1});
 const stars2d=[...Array(150)].map(()=>newStar(true));
-let projT=0;
+let projT=0, projAcc=0;
+// the canvas screens are main-thread work; while music plays they redraw at ~20 fps so the audio scheduler keeps its slack
+const SCREEN_DT=()=>anyPlaying()?1/20:0;
 function heart(c,x,y,s){c.beginPath();c.moveTo(x,y+s*0.3);c.bezierCurveTo(x,y,x-s*0.5,y,x-s*0.5,y+s*0.3);c.bezierCurveTo(x-s*0.5,y+s*0.6,x,y+s*0.8,x,y+s);c.bezierCurveTo(x,y+s*0.8,x+s*0.5,y+s*0.6,x+s*0.5,y+s*0.3);c.bezierCurveTo(x+s*0.5,y,x,y,x,y+s*0.3);c.fill();}
 function sparkle(c,x,y,s){c.beginPath();c.moveTo(x,y-s);c.quadraticCurveTo(x,y,x+s,y);c.quadraticCurveTo(x,y,x,y+s);c.quadraticCurveTo(x,y,x-s,y);c.quadraticCurveTo(x,y,x,y-s);c.fill();}
 const nrm=x=>clamp((x+95)/60,0,1);
@@ -719,7 +743,22 @@ function islandShape(sc,amp){
 }
 function slabFromShape(shape,h,topY,bev){ const b=bev||0.08; const g=new THREE.ExtrudeGeometry(shape,{depth:h,bevelEnabled:true,bevelThickness:b,bevelSize:b*1.4,bevelSegments:2,curveSegments:4}); g.rotateX(-Math.PI/2); g.translate(0,topY-h-b,OCZ); return g; }
 const landK=(x,z)=>Math.pow(Math.abs(x/10.3),3)+Math.pow(Math.abs((z-OCZ)/10.45),3);
-function volcH(d){ for(let i=0;i<VPROF.length-1;i++){ const [r0,y0]=VPROF[i],[r1,y1]=VPROF[i+1]; if(d<=r0&&d>=r1) return y0+(y1-y0)*(r0-d)/(r0-r1); } return d<1.35?7.6:0; }
+// the volcano mesh: VPROF lathed into VSEG segments, each vertex pushed out radially by volcBump (the rugged ridges)
+const VPTS=[...VPROF,[1.2,7.5],[1.0,7.05],[0.001,6.95]], VSEG=72;
+function volcBump(th,y){ return 1+0.055*Math.sin(th*7+y*1.3)+0.035*Math.sin(th*13-y*2.1)+0.02*Math.sin(th*29+y*4)-0.04*Math.max(0,Math.sin(th*5+0.4))*Math.min(1,y/3); }
+let VVERT=null;
+// exact height of the volcano mesh at (x,z), or -Infinity off it. Radial displacement keeps every vertical edge in its own
+// radial plane, so (x,z) lies in one wedge and only that wedge's triangles need testing; the highest hit wins (crater walls).
+function volcSurf(x,z){
+  if(!VVERT){ VVERT=[]; for(let i=0;i<=VSEG;i++){ const ph=i/VSEG*Math.PI*2; VVERT.push(VPTS.map(([r,y])=>{ let vx=r*Math.sin(ph), vz=r*Math.cos(ph); if(!(r<0.3||y>7.45)){ const f=volcBump(Math.atan2(vz,vx),y); vx*=f; vz*=f; } return [vx,y,vz]; })); } }
+  const lx=x-VOLC.x, lz=z-VOLC.z; let ph=Math.atan2(lx,lz); if(ph<0) ph+=Math.PI*2;
+  const i=Math.min(VSEG-1,Math.floor(ph/(Math.PI*2)*VSEG)), A=VVERT[i], B=VVERT[i+1]; let best=-Infinity;
+  const tri=(p,q,s)=>{ const d=(q[2]-s[2])*(p[0]-s[0])+(s[0]-q[0])*(p[2]-s[2]); if(Math.abs(d)<1e-9) return;
+    const a=((q[2]-s[2])*(lx-s[0])+(s[0]-q[0])*(lz-s[2]))/d, b=((s[2]-p[2])*(lx-s[0])+(p[0]-s[0])*(lz-s[2]))/d, c=1-a-b;
+    if(a>=-1e-6&&b>=-1e-6&&c>=-1e-6) best=Math.max(best,a*p[1]+b*q[1]+c*s[1]); };
+  for(let k=0;k<VPTS.length-1;k++){ tri(A[k],B[k],A[k+1]); tri(B[k],B[k+1],A[k+1]); }
+  return best;
+}
 function surfY(x,z){ return Math.max(surfRaw(x,z),-0.29); }
 function ribbon(pts,width,mat){
   const curve=new THREE.CatmullRomCurve3(pts.map(([x,z])=>new THREE.Vector3(x,0,z))), N=90, pos=[], uv=[], idx=[];
@@ -801,7 +840,7 @@ function buildShigost(){
 function sgStopMove(){ if(!sg.ready) return; sg.dance.stop(); sg.jump.stop(); sg.act=null; sg.fading=null; sg.w=0; sg.actT=0; }
 function sgMove(name,beats){
   if(!sg.ready||sg.mode!=='dj') return;
-  const beat=60/(audioReady?Tone.Transport.bpm.value:124), a=sg[name];
+  const beat=60/(audioReady?Tone.getTransport().bpm.value:124), a=sg[name];
   if(sg.act&&sg.act!==a) sg.act.stop();
   if(sg.fading&&sg.fading!==a){ sg.fading.stop(); sg.fading=null; }
   if(name==='dance') a.timeScale=a.getClip().duration/(2*beat);
@@ -931,7 +970,12 @@ float hash(vec2 p){ return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453); }
 float noise(vec2 p){ vec2 i=floor(p),f=fract(p); f=f*f*(3.-2.*f); return mix(mix(hash(i),hash(i+vec2(1,0)),f.x),mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),f.x),f.y); }
 float fbm(vec2 p){ float v=0.,a=0.5; for(int i=0;i<4;i++){ v+=a*noise(p); p*=2.03; a*=0.5; } return v; }`;
 /* ---------- irregular island shoreline, beach, reef flat, drop-off ---------- */
-const SLAB={w:40,d:39,r:0.6}, RN=256;
+// the ocean slab is roomier than the island: ISLE is the footprint the shoreline is generated in, SLAB the sea around it
+const SLAB={w:52,d:50,r:0.6}, ISLE={w:40,d:39}, RN=256;
+// distances from the shoreline: the sand slopes gently into a shallow lagoon, then a wide reef flat, then the drop-off
+const SHELF={beach:3.6,flat:7.0,drop:9.6};
+// maps a distance on the old, narrower shelf (beach 2.2, flat 4.6, drop 6.4) to the same spot on this one, so the reef, fish, and boats keep their places
+const shelfD=d=>{ const K=[[-0.3,-0.3],[2.2,SHELF.beach],[4.6,SHELF.flat],[6.4,SHELF.drop],[9,SHELF.drop+2.6],[20,SHELF.drop+13.6]]; for(let i=0;i<K.length-1;i++){ const [a,A]=K[i],[b,B]=K[i+1]; if(d<=b) return A+(B-A)*(d-a)/(b-a); } return d+SHELF.drop-6.4; };
 const RA=(()=>{
   const req=[[4.3,-7.1,1],[-4.3,-7.1,1],[4.3,-1.8,1],[-4.3,-1.8,1],[7.25,-3.7,0.8],[-7.25,-3.7,0.8],[7.25,-5.1,0.8],[-7.25,-5.1,0.8],[4.5,-0.9,0.8],[-4.5,-0.9,0.8],[4.5,5.0,1.0],[-4.5,5.0,1.0],[0,5.0,1.0],
     [7.6,-1.8,0.8],[-7.6,-1.8,0.8],[5.3,-1.0,0.6],[-5.3,-1.0,0.6],[7.9,5.6,0.8],[-7.9,5.6,0.8],[-8.7,1.2,1.2],[8.6,2.6,1.2],[8.4,-6.4,1.2],[2.6,-10.6,1.2],[6.6,-9.6,1.2],[-8.0,5.2,1.2],[8.2,5.4,1.2],
@@ -944,7 +988,7 @@ const RA=(()=>{
     R[i]=r; }
   const blur=(a,w)=>{ const o=new Float32Array(RN); for(let i=0;i<RN;i++){ let s=0,c=0; for(let k=-w;k<=w;k++){ const g=Math.exp(-(k*k)/(w*w*0.5)); s+=a[(i+k+RN)%RN]*g; c+=g; } o[i]=s/c; } return o; };
   let S=new Float32Array(RN);
-  for(let i=0;i<RN;i++){ const th=i/RN*Math.PI*2, c=Math.abs(Math.cos(th)), sn=Math.abs(Math.sin(th)), room=Math.min(SLAB.w/2/Math.max(c,1e-3),SLAB.d/2/Math.max(sn,1e-3))-6.2;
+  for(let i=0;i<RN;i++){ const th=i/RN*Math.PI*2, c=Math.abs(Math.cos(th)), sn=Math.abs(Math.sin(th)), room=Math.min(ISLE.w/2/Math.max(c,1e-3),ISLE.d/2/Math.max(sn,1e-3))-6.2;
     const base=11.8+1.5*Math.sin(th*2+0.4)+0.9*Math.sin(th*3+2.0)+0.55*Math.sin(th*5+1.1)+0.3*Math.sin(th*8+0.2)+0.15*Math.sin(th*13+1.7);
     S[i]=Math.max(Math.min(base,room),R[i]+0.3); }
   S=blur(S,5); for(let i=0;i<RN;i++) S[i]=Math.max(S[i],R[i]+0.2);
@@ -957,23 +1001,24 @@ const vnoise=(x,z)=>Math.sin(x*1.3+Math.sin(z*0.9))*0.5+Math.sin(z*1.7+Math.sin(
 function terrainH(x,z){
   const d=shoreD(x,z), n=vnoise(x,z);
   if(d<-0.3) return 0;
-  if(d<2.2) return -0.62*sstep(-0.3,2.2,d);
-  if(d<4.6) return -0.62-0.2*sstep(2.2,4.6,d)+0.07*n;
-  if(d<6.4) return lerp(-0.82+0.07*n,-3.95,sstep(4.6,6.4,d));
-  return -3.95-0.22*sstep(6.4,9,d)+0.08*n;
+  if(d<SHELF.beach) return -0.62*sstep(-0.3,SHELF.beach,d);
+  if(d<SHELF.flat) return -0.62-0.23*sstep(SHELF.beach,SHELF.flat,d)+0.07*n;
+  if(d<SHELF.drop) return lerp(-0.85+0.07*n,-3.95,sstep(SHELF.flat,SHELF.drop,d));
+  return -3.95-0.22*sstep(SHELF.drop,SHELF.drop+2.6,d)+0.08*n;
 }
-function surfRaw(x,z){ const dv=Math.hypot(x-VOLC.x,z-VOLC.z); return dv<VOLC.r?Math.max(volcH(dv),terrainH(x,z)):terrainH(x,z); }
+// the ridges push the volcano's foot out to about 1.11 x VOLC.r, so look it up a little past the profile radius
+function surfRaw(x,z){ const dv=Math.hypot(x-VOLC.x,z-VOLC.z); return dv<VOLC.r*1.15?Math.max(volcSurf(x,z),terrainH(x,z)):terrainH(x,z); }
 function clampRB(x,z){ const hx=SLAB.w/2-0.02, hz=SLAB.d/2-0.02, r=SLAB.r; let ax=Math.min(Math.abs(x),hx), az=Math.min(Math.abs(z-OCZ),hz); const qx=ax-(hx-r), qz=az-(hz-r);
   if(qx>0&&qz>0){ const l=Math.hypot(qx,qz); if(l>r){ ax=hx-r+qx/l*r; az=hz-r+qz/l*r; } } return [Math.sign(x)*ax, OCZ+Math.sign(z-OCZ)*az]; }
 const TCOL={grass:'#79c95f',sand:'#f1dfb4',wet:'#d8bf8c',reef:'#e6d3a6',rock:'#56485a',bed:'#d8c79c'};
 function terrainColor(x,z,y,c){ const d=shoreD(x,z), cs=C, n=vnoise(x*2.3,z*2.1);
-  if(d<-0.1){ c.copy(cs(TCOL.grass)).lerp(cs(TCOL.sand),sstep(-0.6,-0.1,d)); return c; }
+  if(d<-0.1){ c.copy(cs(TCOL.grass)).lerp(cs(TCOL.sand),sstep(-1.5,-0.4,d)); return c; }
   if(y>-0.36){ c.copy(cs(TCOL.sand)).lerp(cs(TCOL.wet),sstep(-0.22,-0.34,y)); return c; }
   if(y>-1.0){ c.copy(cs(TCOL.wet)).lerp(cs(TCOL.reef),sstep(-0.36,-0.6,y)); if(n>0.55) c.lerp(cs('#c9a8b8'),0.35); return c; }
   if(y>-3.7){ c.copy(cs(TCOL.reef)).lerp(cs(TCOL.rock),sstep(-1.0,-1.8,y)); return c; }
   c.copy(cs(TCOL.rock)).lerp(cs(TCOL.bed),sstep(-3.7,-4.0,y)); return c; }
 function buildTerrain(){
-  const NX=190, NZ=184, pos=[], col=[], idx=[], c=new THREE.Color();
+  const NX=Math.round(SLAB.w*4.75), NZ=Math.round(SLAB.d*4.72), pos=[], col=[], idx=[], c=new THREE.Color();
   for(let j=0;j<=NZ;j++) for(let i=0;i<=NX;i++){ let x=-SLAB.w/2+SLAB.w*i/NX, z=OCZ-SLAB.d/2+SLAB.d*j/NZ; [x,z]=clampRB(x,z); const y=terrainH(x,z); pos.push(x,y,z); terrainColor(x,z,y,c); col.push(c.r,c.g,c.b); }
   for(let j=0;j<NZ;j++) for(let i=0;i<NX;i++){ const a=j*(NX+1)+i, b=a+NX+1; idx.push(a,b,a+1,a+1,b,b+1); }
   const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3)); g.setAttribute('color',new THREE.Float32BufferAttribute(col,3)); g.setIndex(idx); g.computeVertexNormals();
@@ -1000,7 +1045,7 @@ function waveHjs(x,z,t){
 function randOcean(d0,d1,tries){ for(let k=0;k<(tries||400);k++){ const x=(Math.random()-0.5)*(SLAB.w-1.2), z=OCZ+(Math.random()-0.5)*(SLAB.d-1.2); const d=shoreD(x,z); if(d>=d0&&d<=d1) return [x,z,d]; } return null; }
 function makeWaterSurface(hTex){
   const u={uTime:{value:0},uNight:{value:0},uBass:{value:0},uH:{value:hTex},uSun:{value:new THREE.Vector3(-0.45,0.8,0.42).normalize()}};
-  const g=new THREE.PlaneGeometry(SLAB.w,SLAB.d,180,175); g.rotateX(-Math.PI/2);
+  const g=new THREE.PlaneGeometry(SLAB.w,SLAB.d,Math.round(SLAB.w*4.5),Math.round(SLAB.d*4.5)); g.rotateX(-Math.PI/2);
   const HS=`uniform sampler2D uH; float terr(vec2 w){ vec2 uv=vec2((w.x+${(SLAB.w/2).toFixed(2)})/${SLAB.w.toFixed(1)},(w.y-(${(OCZ-SLAB.d/2).toFixed(2)}))/${SLAB.d.toFixed(1)}); return texture2D(uH,uv).r*5.-4.5; }
     float waveH(vec2 p,float t,float depth){ float h=0.06*sin(dot(p,vec2(0.55,0.25))+t*1.3)+0.04*sin(dot(p,vec2(-0.3,0.7))*1.6+t*1.9)+0.025*sin(dot(p,vec2(0.8,-0.5))*2.7+t*2.6)+0.015*sin(dot(p,vec2(-0.6,-0.6))*4.1+t*3.3); return h*(0.2+0.8*smoothstep(0.05,2.,depth)); }`;
   const m=new THREE.ShaderMaterial({uniforms:u,transparent:true,
@@ -1103,10 +1148,13 @@ function makeLavaShader(){
   return {m,u};
 }
 function ribbon2(pts,width,mat,lift,bulge,seg){
-  const curve=new THREE.CatmullRomCurve3(pts.map(([x,z])=>new THREE.Vector3(x,0,z))), N=110, M=seg||6, pos=[], uv=[], idx=[];
+  const curve=new THREE.CatmullRomCurve3(pts.map(([x,z])=>new THREE.Vector3(x,0,z))), N=110, M=seg||6, pos=[], uv=[], idx=[], ds=curve.getLength()/N/2;
   for(let i=0;i<=N;i++){ const t=i/N, p=curve.getPoint(t), tg=curve.getTangent(t); let nx=-tg.z, nz=tg.x; const l=Math.hypot(nx,nz)||1; nx/=l; nz/=l;
-    const w=width*(0.8+0.2*Math.sin(t*19)+0.12*Math.sin(t*43))*(1+t*0.5);
-    for(let j=0;j<=M;j++){ const v=j/M, s=v*2-1, x=p.x+nx*w*s, z=p.z+nz*w*s; pos.push(x,surfY(x,z)+lift+bulge*Math.sin(Math.PI*v),z); uv.push(t*8,v); } }
+    const w=width*(0.8+0.2*Math.sin(t*19)+0.12*Math.sin(t*43))*(1+t*0.5), dw=w/M;
+    // highest ground within half a cell, so the flat span between vertices clears ridges and the crater rim
+    for(let j=0;j<=M;j++){ const v=j/M, s=v*2-1, x=p.x+nx*w*s, z=p.z+nz*w*s;
+      let h=-Infinity; for(let a=-1;a<=1;a++) for(let c=-1;c<=1;c++) h=Math.max(h,surfY(x+tg.x*ds*a+nx*dw*c,z+tg.z*ds*a+nz*dw*c));
+      pos.push(x,h+lift+bulge*Math.sin(Math.PI*v),z); uv.push(t*8,v); } }
   for(let i=0;i<N;i++) for(let j=0;j<M;j++){ const a=i*(M+1)+j, b=a+M+1; idx.push(a,b,a+1,a+1,b,b+1); }
   const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3)); g.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2)); g.setIndex(idx); g.computeVertexNormals();
   const me=new THREE.Mesh(g,mat); me.receiveShadow=true; inner.add(me); return {mesh:me,curve,end:curve.getPoint(1)};
@@ -1222,7 +1270,7 @@ function fishShape(m,s,col){ m.strokeStyle=col; m.lineWidth=1.5; m.beginPath(); 
 function latteShape(m,s,col){ m.strokeStyle=col; m.lineWidth=1.5; m.beginPath(); m.moveTo(-s*0.16,0); m.lineTo(-s*0.1,-s); m.lineTo(s*0.1,-s); m.lineTo(s*0.16,0); m.closePath(); m.moveTo(-s*0.32,-s); m.quadraticCurveTo(0,-s*1.42,s*0.32,-s); m.closePath(); m.stroke(); }
 function sinahi(m,r,col,fill){ m.beginPath(); m.arc(0,0,r,Math.PI*0.12,Math.PI*0.88); m.arc(0,-r*0.36,r*0.83,Math.PI*0.84,Math.PI*0.16,true); m.closePath(); m.fillStyle=fill; m.fill(); m.strokeStyle=col; m.lineWidth=2; m.stroke(); }
 function drawSail(dt){
-  sailT+=dt; sailAcc+=dt; if(sailAcc<1/30) return; const step=sailAcc; sailAcc=0;
+  sailT+=dt; sailAcc+=dt; if(sailAcc<Math.max(1/30,SCREEN_DT())) return; const step=sailAcc; sailAcc=0;
   const mode=show.sail==='auto'?['puntan','cave','latte'][Math.floor(sailT/20)%3]:show.sail;
   const c=sx; c.globalCompositeOperation='source-over'; c.globalAlpha=1; c.shadowBlur=0; c.drawImage(sailBase,0,0);
   if(mode==='off'){ isl.sailTex.needsUpdate=true; return; }
@@ -1362,19 +1410,21 @@ function strapClumpGeo(n,L,col0,col1){ const parts=[], lg=leafGeo(L,0.07,L*0.45)
 function bushGeo(R,col0,col1){ const parts=[]; blobCanopy(parts,0,R*0.55,0,R,7,col0,col1,0.8); return mergeC(parts); }
 // keep plants off the stage, dance floor, paths, and props
 const PLANT_BLOCK=[];
-function plantFree(x,z,r){
+// r is the plant's canopy radius (kept clear of the stage and volcano); foot (default r) is its spacing from other plants and props,
+// smaller than a tree's canopy so neighbouring crowns can overlap the way they do in a real grove
+function plantFree(x,z,r,foot){
   if(terrainH(x,z)<-0.02||shoreD(x,z)>-0.2) return false;
-  if(x>-5.4&&x<5.4&&z>-7.8&&z<5.9) return false;
+  if(x>-5.4-r&&x<5.4+r&&z>-7.8-r&&z<5.9+r) return false;
   if(Math.hypot(x-VOLC.x,z-VOLC.z)<VOLC.r+0.4+r) return false;
-  for(const [bx,bz,br] of PLANT_BLOCK) if(Math.hypot(x-bx,z-bz)<br+r) return false;
+  const f=foot||r; for(const [bx,bz,br] of PLANT_BLOCK) if(Math.hypot(x-bx,z-bz)<br+f) return false;
   return true;
 }
-function plantSpot(r,tries,pref){ for(let k=0;k<(tries||300);k++){ const x=(Math.random()-0.5)*36, z=OCZ+(Math.random()-0.5)*36; if(pref&&!pref(x,z)) continue; if(plantFree(x,z,r)) { PLANT_BLOCK.push([x,z,r]); return [x,z]; } } return null; }
+function plantSpot(r,tries,pref,foot){ for(let k=0;k<(tries||300);k++){ const x=(Math.random()-0.5)*36, z=OCZ+(Math.random()-0.5)*36; if(pref&&!pref(x,z)) continue; if(plantFree(x,z,r,foot)) { PLANT_BLOCK.push([x,z,foot||r]); return [x,z]; } } return null; }
 function beachSpot(){ for(let k=0;k<200;k++){ const x=(Math.random()-0.5)*38, z=OCZ+(Math.random()-0.5)*38, d=shoreD(x,z); if(d>-0.35&&d<0.55&&terrainH(x,z)>-0.25){ if(x>-5.4&&x<5.4&&z>-7.8&&z<5.9) continue; if(Math.hypot(x-VOLC.x,z-VOLC.z)<VOLC.r+0.1) continue; return [x,z]; } } return null; }
 function init3D(){
   const canvas=$('#three');
   renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:true,powerPreference:'high-performance'});
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2));
+  renderer.setPixelRatio(pixelRatio());
   renderer.setClearColor(0x000000,0);
   renderer.outputEncoding=THREE.sRGBEncoding;
   renderer.shadowMap.enabled=true; renderer.shadowMap.type=THREE.PCFSoftShadowMap;
@@ -1398,7 +1448,7 @@ function init3D(){
   const wcol=mesh(colGeo,isl.water,0,-4.3,OCZ); wcol.castShadow=false; wcol.receiveShadow=false; wcol.renderOrder=1; wcol.userData.tap=()=>{ squish(1.1); addVibe(1); };
   let oy=-4.3;
   [[0.45,std('#ecdcb0',{roughness:0.95})],[0.55,std('#d6ccb6',{roughness:0.95})],[0.5,std('#3d3442',{roughness:0.9})],[0.3,new THREE.MeshStandardMaterial({color:C('#ff6a2a'),emissive:C('#ff4a12'),emissiveIntensity:0.8,roughness:0.6})]].forEach(([t,m],i)=>{ oy-=t; const mm=mesh(rbox(SLAB.w,t,SLAB.d,SLAB.r,0.05),m,0,oy,OCZ); mm.userData.tap=()=>{ squish(1.1); addVibe(1); }; if(i===3) isl.magma=m; });
-  const shp=new THREE.Mesh(new THREE.PlaneGeometry(60,58),new THREE.MeshBasicMaterial({map:shadowTexture(),transparent:true,depthWrite:false})); shp.rotation.x=-Math.PI/2; shp.position.set(0,BASE-1.3,OCZ); scene.add(shp);
+  const shp=new THREE.Mesh(new THREE.PlaneGeometry(SLAB.w*1.5,SLAB.d*1.5),new THREE.MeshBasicMaterial({map:shadowTexture(),transparent:true,depthWrite:false})); shp.rotation.x=-Math.PI/2; shp.position.set(0,BASE-1.3,OCZ); scene.add(shp);
   isl.cWE=C('#1fd7ff');
   const terr=buildTerrain(); terr.userData.tap=()=>{ squish(1.1); addVibe(1); toast('The island hums with the bass'); };
   isl.wu=makeWaterSurface(heightTex());
@@ -1419,7 +1469,7 @@ function init3D(){
   // coral reef on the reef flat and down the drop-off, glowing at night
   const CG=coralGeos(), KG=critterGeos(), dmc=new THREE.Object3D(); isl.coralMats=[]; isl.anemones=[];
   const reef=(geo,mat,n,cols,d0,d1,sc0,sc1,opt)=>{ opt=opt||{}; const im=new THREE.InstancedMesh(geo,mat,n), cc=cols.map(C); let placed=0; geo.computeBoundingBox(); const gh=Math.max(0.05,geo.boundingBox.max.y);
-    for(let i=0;i<n;i++){ const p=randOcean(d0,d1); if(!p) continue; const [x,z]=p; const y=terrainH(x,z);
+    for(let i=0;i<n;i++){ const p=randOcean(shelfD(d0),shelfD(d1)); if(!p) continue; const [x,z]=p; const y=terrainH(x,z);
       dmc.position.set(x,y-0.02,z); const outward=Math.atan2(x,z-OCZ); dmc.rotation.set(opt.tilt?(Math.random()-0.5)*0.4:0,opt.face?outward:Math.random()*6.28,0); const ys=0.85+Math.random()*0.35; let k=sc0+Math.random()*(sc1-sc0); k=Math.min(k,(-0.31-0.3-y)/(gh*ys)); if(k<0.35) continue; dmc.scale.set(k,k*ys,k); dmc.updateMatrix(); im.setMatrixAt(placed,dmc.matrix); im.setColorAt(placed,cc[placed%cc.length]); if(opt.list) opt.list.push(new THREE.Vector3(x,y,z)); placed++; }
     im.count=placed; im.castShadow=true; inner.add(im); isl.coralMats.push(mat); return im; };
   const cm=(o)=>glowify(new THREE.MeshStandardMaterial(Object.assign({color:0xffffff,roughness:0.65},o||{})));
@@ -1446,10 +1496,10 @@ function init3D(){
       return {off:5.4+Math.random()*4.6,a:Math.random()*6.28,sp:(0.04+Math.random()*0.05)*(Math.random()<0.5?1:-1),depth:0.9+Math.random()*2.7,ph:Math.random()*6.28,school:Math.floor(i/3)}; });
     isl.fishSets.push({im,data,sp}); });
   // volcano: a big rugged cone with jungle at its foot, ash and scorched rock up top, and a glowing crater
-  const vg=new THREE.LatheGeometry([...VPROF,[1.2,7.5],[1.0,7.05],[0.001,6.95]].map(p=>new THREE.Vector2(p[0],p[1])),72,0,Math.PI*2);
+  const vg=new THREE.LatheGeometry(VPTS.map(p=>new THREE.Vector2(p[0],p[1])),VSEG,0,Math.PI*2);
   { const vp=vg.attributes.position;
-    for(let i=0;i<vp.count;i++){ const x=vp.getX(i), y=vp.getY(i), z=vp.getZ(i), r=Math.hypot(x,z); if(r<0.3||y>7.45) continue; const th=Math.atan2(z,x);
-      const f=1+0.055*Math.sin(th*7+y*1.3)+0.035*Math.sin(th*13-y*2.1)+0.02*Math.sin(th*29+y*4)-0.04*Math.max(0,Math.sin(th*5+0.4))*Math.min(1,y/3); vp.setX(i,x*f); vp.setZ(i,z*f); }
+    for(let i=0;i<vp.count;i++){ const x=vp.getX(i), y=vp.getY(i), z=vp.getZ(i), r=Math.hypot(x,z); if(r<0.3||y>7.45) continue;
+      const f=volcBump(Math.atan2(z,x),y); vp.setX(i,x*f); vp.setZ(i,z*f); }
     vg.computeVertexNormals();
     const vcol=[], cg=C('#5fae4c'), cj=C('#3d7f3a'), cb=C('#6a4a3c'), ck=C('#2b252c'), cr=C('#5a2a22'), tc=new THREE.Color();
     for(let i=0;i<vp.count;i++){ const y=vp.getY(i), th=Math.atan2(vp.getZ(i),vp.getX(i)), n=0.5+0.5*Math.sin(th*11+y*3);
@@ -1465,8 +1515,9 @@ function init3D(){
   const rimRocks=new THREE.InstancedMesh(new THREE.DodecahedronGeometry(1,0),rimM,14), drr=new THREE.Object3D();
   for(let k=0;k<14;k++){ const a=k/14*Math.PI*2+Math.random()*0.2; drr.position.set(VOLC.x+Math.cos(a)*1.42,7.6+Math.random()*0.1,VOLC.z+Math.sin(a)*1.42); drr.rotation.set(Math.random()*3,Math.random()*3,0); drr.scale.setScalar(0.16+Math.random()*0.14); drr.updateMatrix(); rimRocks.setMatrixAt(k,drr.matrix); }
   inner.add(rimRocks);
-  // a small cinder cone on the flank with its own glowing vent
-  { const a=0.55, d=4.1, cx=VOLC.x+Math.cos(a)*d, cz=VOLC.z+Math.sin(a)*d, cy=volcH(d)-0.25;
+  // a small cinder cone with its own glowing vent, on flat ground at the volcano's foot (toward +z, away from the lava rivers and the house)
+  // (VOLC.r+1.2 is the nearest spot where its whole base sits on flat ground clear of the volcano's ridged foot)
+  { const a=100*Math.PI/180, d=VOLC.r+1.2, cx=VOLC.x+Math.cos(a)*d, cz=VOLC.z+Math.sin(a)*d, cy=0; PLANT_BLOCK.push([cx,cz,1.6]); isl.cone2=[cx,cz];
     const cone=mesh(new THREE.LatheGeometry([[1.25,0],[0.95,0.6],[0.55,1.15],[0.45,1.25],[0.3,1.05],[0.001,1.0]].map(p=>new THREE.Vector2(p[0],p[1])),28),new THREE.MeshStandardMaterial({color:C('#3a2f33'),roughness:0.95,side:THREE.DoubleSide}),cx,cy,cz);
     const vent=mesh(new THREE.CircleGeometry(0.34,20),LS.m,cx,cy+1.04,cz,null,false); vent.rotation.x=-Math.PI/2; isl.vent2=new THREE.Vector3(cx,cy+1.15,cz); }
   isl.lavaLight=new THREE.PointLight(C('#ff6a2a'),1.4,26); isl.lavaLight.position.set(VOLC.x,9.4,VOLC.z); inner.add(isl.lavaLight);
@@ -1487,7 +1538,7 @@ function init3D(){
   const bould=new THREE.InstancedMesh(new THREE.DodecahedronGeometry(1,0),rockM,110), db=new THREE.Object3D(); let bi=0;
   isl.rivers.forEach((r,ri)=>{ for(let k=0;k<36;k++){ const t=Math.random()*0.92, p=r.curve.getPoint(t), tg=r.curve.getTangent(t), side=k%2?1:-1, off=RW[ri]*(1.7+Math.random()*0.6)*(1+t*0.5);
     const x=p.x-tg.z*off*side, z=p.z+tg.x*off*side; db.position.set(x,surfRaw(x,z)+0.05,z); db.rotation.set(Math.random()*3,Math.random()*3,0); db.scale.setScalar(0.08+Math.random()*0.14); db.updateMatrix(); bould.setMatrixAt(bi++,db.matrix); } });
-  bould.castShadow=true; inner.add(bould);
+  bould.count=bi; bould.castShadow=true; inner.add(bould);
   const hp=[]; isl.rivers.forEach(r=>{ for(let k=0;k<=18;k++){ const p=r.curve.getPoint(k/18); hp.push(p.x,surfY(p.x,p.z)+0.25,p.z); } });
   const hg=new THREE.BufferGeometry(); hg.setAttribute('position',new THREE.Float32BufferAttribute(hp,3));
   isl.heatM=new THREE.PointsMaterial({size:1.4,map:glowTexture(),color:C('#ff7a2a'),transparent:true,opacity:0.5,depthWrite:false,blending:THREE.AdditiveBlending});
@@ -1620,10 +1671,12 @@ function init3D(){
   [[-8.7,1.2,7.2,0.5],[8.6,2.6,7.8,-0.6],[8.4,-6.4,9.5,0.4],[2.6,-10.6,10.5,0.3],[6.6,-9.6,9,-0.4],[-8.0,5.2,6.2,0.7],[8.2,5.4,5.8,-0.5]].forEach(([x,z,h,l])=>{ PLANT_BLOCK.push([x,z,1.0]); sways.push(palm(x,z,h,l)); });
   pandanus(8.7,-2.6,1.35); pandanus(-8.6,-2.6,1.4); pandanus(-2.6,-10.4,1.25); [[8.7,-2.6],[-8.6,-2.6],[-2.6,-10.4]].forEach(([x,z])=>PLANT_BLOCK.push([x,z,1.2]));
   const back=(x,z)=>z<-6.5||Math.abs(x)>7.5;
-  for(let k=0;k<2;k++){ let p=plantSpot(3.2,600,(x,z)=>z<-8||Math.abs(x)>9); if(!p) p=plantSpot(2.8,600,back); if(p) banyan(p[0],p[1],0.9+Math.random()*0.2); }
-  for(let k=0;k<4;k++){ const p=plantSpot(2.1,500,back); if(p) breadfruit(p[0],p[1],0.95+Math.random()*0.25); }
-  for(let k=0;k<11;k++){ const p=plantSpot(0.9,400,(x,z)=>back(x,z)||Math.abs(x)>6.5); if(p) sways.push(palm(p[0],p[1],7+Math.random()*4,(Math.random()-0.5)*1.2)); }
-  const pagos=[]; for(let k=0;k<6;k++){ const p=plantSpot(1.6,400); if(p) pagos.push(pago(p[0],p[1],0.9+Math.random()*0.3)); }
+  // size first, so the canopy radius passed to plantSpot is the real one (banyan 3.6s, breadfruit 2.4s, pågo 1.8s)
+  for(let k=0;k<2;k++){ const s=0.9+Math.random()*0.2; let p=plantSpot(3.6*s,600,(x,z)=>z<-8||Math.abs(x)>9,3.2); if(!p) p=plantSpot(3.6*s,600,back,2.8); if(p) banyan(p[0],p[1],s); }
+  for(let k=0;k<4;k++){ const s=0.95+Math.random()*0.25, p=plantSpot(2.4*s,500,back,2.1); if(p) breadfruit(p[0],p[1],s); }
+  // a palm's fronds reach 0.42h from its crown, and the lean moves the crown up to 0.18h*|lean| off the trunk base
+  for(let k=0;k<11;k++){ const h=7+Math.random()*4, lean=(Math.random()-0.5)*1.2, p=plantSpot(h*(0.42+0.18*Math.abs(lean)),400,(x,z)=>back(x,z)||Math.abs(x)>6.5,0.9); if(p) sways.push(palm(p[0],p[1],h,lean)); }
+  const pagos=[]; for(let k=0;k<6;k++){ const s=0.9+Math.random()*0.3, p=plantSpot(1.8*s,400,null,1.6); if(p) pagos.push(pago(p[0],p[1],s)); }
   isl.sways=sways;
   // instanced understory
   const dmp=new THREE.Object3D();
@@ -1688,7 +1741,7 @@ function init3D(){
   const sgm=new THREE.BufferGeometry(); sgm.setAttribute('position',new THREE.BufferAttribute(sp,3));
   starPts=new THREE.Points(sgm,new THREE.PointsMaterial({color:0xffffff,size:1.1,map:tex,transparent:true,opacity:0,depthWrite:false})); scene.add(starPts);
 
-  const resize=()=>{ const w=window.innerWidth,h=window.innerHeight; renderer.setSize(w,h,false); view.w=w; view.h=h; updateViewTargets(); };
+  const resize=()=>{ const w=window.innerWidth,h=window.innerHeight; renderer.setPixelRatio(pixelRatio()); renderer.setSize(w,h,false); view.w=w; view.h=h; updateViewTargets(); };
   window.addEventListener('resize',resize); resize();
   setupPointer(canvas);
 }
@@ -1855,15 +1908,15 @@ function update3D(dt,T){
   // scenery bounce
   inner.children.forEach(o=>{ if(o.userData.boing){ o.userData.boing=Math.max(0,o.userData.boing-dt*2); const b=o.userData.boing; const s=o.userData.baseS||(o.userData.baseS=o.scale.x); o.scale.set(s*(1+Math.sin(b*14)*0.12*b),s*(1-Math.sin(b*14)*0.15*b),s*(1+Math.sin(b*14)*0.12*b)); } });
   (isl.sways||[]).forEach(g=>{ g.rotation.z=Math.sin(T*0.7+g.userData.sway.ph)*0.012*(1+lv.bass*0.6); g.rotation.x=Math.cos(T*0.55+g.userData.sway.ph)*0.008; });
-  clouds.forEach((c,i)=>{ if(!c.isGroup) return; c.position.x+=dt*0.25*(i%2?1:0.7); if(c.position.x>17) c.position.x=-17; });
+  clouds.forEach((c,i)=>{ if(!c.isGroup) return; c.position.x+=dt*0.25*(i%2?1:0.7); if(c.position.x>SLAB.w/2-3) c.position.x=-(SLAB.w/2-3); });
   // ocean life: haggan turtle and a sakman proa circling the island
-  { const tf=(a)=>{ const r=islandR(a)+2.6; return clampRB(Math.cos(a)*r,OCZ+Math.sin(a)*r); }; const ta=T*0.05, [tx,tz]=tf(ta), [nx,nz]=tf(ta+0.02);
+  { const tf=(a)=>{ const r=islandR(a)+shelfD(2.6); return clampRB(Math.cos(a)*r,OCZ+Math.sin(a)*r); }; const ta=T*0.05, [tx,tz]=tf(ta), [nx,nz]=tf(ta+0.02);
     duck.position.set(tx,-0.48+Math.max(0,Math.sin(T*0.5))*0.1,tz); duck.rotation.y=Math.atan2(nx-tx,nz-tz); }
   duck.children.forEach(f=>{ if(f.userData.flip!==undefined) f.rotation.z=Math.sin(T*3+f.userData.flip*1.6)*0.35; });
   if(duck.userData.spin){ duck.userData.spin=Math.max(0,duck.userData.spin-dt); duck.rotation.y+=duck.userData.spin*12; duck.position.y+=Math.sin(duck.userData.spin*Math.PI)*0.4; }
   balloon.userData.a=(balloon.userData.a||2)-dt*(0.04+(balloon.userData.boost||0)*0.06); balloon.userData.boost=Math.max(0,(balloon.userData.boost||0)-dt);
   { const hw=SLAB.w/2-4.0, hd=SLAB.d/2-4.0;
-    const bp=(a)=>{ const r=islandR(a)+4.2; let x=Math.cos(a)*r, z=Math.sin(a)*r; const s=Math.min(1,hw/Math.max(1e-3,Math.abs(x)),hd/Math.max(1e-3,Math.abs(z))); return [x*s,OCZ+z*s]; };
+    const bp=(a)=>{ const r=islandR(a)+shelfD(4.2)+1.2; let x=Math.cos(a)*r, z=Math.sin(a)*r; const s=Math.min(1,hw/Math.max(1e-3,Math.abs(x)),hd/Math.max(1e-3,Math.abs(z))); return [x*s,OCZ+z*s]; };
     const a=balloon.userData.a, [bx,bz]=bp(a), [nx,nz]=bp(a-0.015), h=waveHjs(bx,bz,T), hx=(waveHjs(bx+0.6,bz,T)-h)/0.6, hz=(waveHjs(bx,bz+0.6,T)-h)/0.6;
     balloon.userData.yaw=balloon.userData.yaw===undefined?Math.atan2(-(nz-bz),nx-bx):balloon.userData.yaw;
     let ty=Math.atan2(-(nz-bz),nx-bx), dy=((ty-balloon.userData.yaw+Math.PI)%(Math.PI*2)+Math.PI*2)%(Math.PI*2)-Math.PI; balloon.userData.yaw+=dy*Math.min(1,dt*2);
@@ -1896,7 +1949,7 @@ function update3D(dt,T){
   { const dmf=crowd.dummy; isl.fishM.userData.u.uTime.value=T; isl.fishM.userData.u.uGlow.value=night*(0.15+lv.bass*0.6);
     isl.fishSets.forEach(({im,data})=>{ data.forEach((f,i)=>{ let x,y,z,vx,vz;
         if(f.home){ f.a+=dt*f.sp; x=f.home.x+Math.cos(f.a)*f.r; z=f.home.z+Math.sin(f.a)*f.r; y=Math.min(-0.65,f.home.y+f.y+Math.sin(T*2+i)*0.04); vx=-Math.sin(f.a); vz=Math.cos(f.a); }
-        else { f.a+=f.sp*dt; const p=(a)=>{ const r=islandR(a)+f.off+Math.sin(T*0.4+f.ph)*0.5; return clampRB(Math.cos(a)*r,OCZ+Math.sin(a)*r); };
+        else { f.a+=f.sp*dt; const p=(a)=>{ const r=islandR(a)+shelfD(f.off)+Math.sin(T*0.4+f.ph)*0.5; return clampRB(Math.cos(a)*r,OCZ+Math.sin(a)*r); };
           [x,z]=p(f.a); const [nx,nz]=p(f.a+Math.sign(f.sp)*0.01); vx=nx-x; vz=nz-z;
           y=Math.min(-0.65,Math.max(terrainH(x,z)+0.3,-0.31-f.depth+Math.sin(T*0.8+f.ph)*0.12)); }
         dmf.position.set(x,y,z); dmf.rotation.set(0,Math.atan2(-vz,vx),Math.sin(T*1.5+i)*0.08); dmf.scale.setScalar(1); dmf.updateMatrix(); im.setMatrixAt(i,dmf.matrix); });
@@ -1967,7 +2020,7 @@ function update3D(dt,T){
   crowd.sticks.geometry.attributes.position.needsUpdate=true;
   crowd.sticks.material.opacity=night*(0.3+0.7*e);
 
-  drawProj(dt); projTex.needsUpdate=true;
+  projAcc+=dt; if(projAcc>=SCREEN_DT()){ drawProj(projAcc); projTex.needsUpdate=true; projAcc=0; }
   renderer.render(scene,camera);
 }
 
@@ -1987,7 +2040,7 @@ function frame(now){
   vibe=Math.max(0,vibe-dt*(anyPlaying()?0.35:1.5));
   update3D(dt,T);
   uiT+=dt;
-  if(uiT>0.1){ uiT=0; if(amb) amb.gain.rampTo(ambLevel*(anyPlaying()?0.45:1),0.4);
+  if(uiT>0.1){ uiT=0; if(amb){ const al=ambLevel*(anyPlaying()?0.45:1); amb.gain.rampTo(al,0.4); if(ambVerb) ambVerb.gain.rampTo(al*0.8,0.4); }
     $('#vibeFill').style.width=vibe+'%'; $('#vibeVal').textContent=Math.round(vibe);
     const rs=document.documentElement.style;
     rs.setProperty('--sky1',mixRGB(SKY.d1,SKY.n1,night)); rs.setProperty('--sky2',mixRGB(SKY.d2,SKY.n2,night));
@@ -2042,7 +2095,7 @@ function buildChannels(){
     const kill=el('button','kill','Cut low'); kill.setAttribute('aria-label','Cut low on deck '+id); row.append(kill);
     kill.addEventListener('click',()=>{ const d=decks[id]; if(!d) return; const k=knobs[id].low; k.set(d.lowVal<=-29?0:-1); });
     const foot=el('div','chanFoot'); const lb=el('label',null,'Volume'); const vol=el('input'); vol.type='range'; vol.min=0; vol.max=1; vol.step=0.01; vol.value=0.8; vol.setAttribute('aria-label','Volume deck '+id);
-    vol.addEventListener('input',()=>{ if(decks[id]) decks[id].fader.gain.rampTo(+vol.value,0.03); });
+    vol.addEventListener('input',()=>{ const d=decks[id]; if(d){ d.fader.gain.rampTo(+vol.value,0.03); d.revFader.gain.rampTo(+vol.value,0.03); } });
     foot.append(lb,vol); ch.append(foot);
     const cr=el('div','cueRow');
     ['Intro','Build','Drop','Break'].forEach(n=>{ const b=el('button','cue',n); b.dataset.s=n; b.setAttribute('aria-label','Hot cue '+n+' on deck '+id); b.addEventListener('click',()=>hotCue(id,n)); cr.append(b); });
@@ -2195,13 +2248,16 @@ function bindGlobal(){
   $('#fxPhaser').addEventListener('click',()=>{ if(!audioReady) return; phaserOn=!phaserOn; phaser.wet.rampTo(phaserOn?0.6:0,0.2); $('#fxPhaser').classList.toggle('on',phaserOn); });
   $('#fxGate').addEventListener('click',()=>{ if(!audioReady) return; gateOn=!gateOn; if(!gateOn) gateG.gain.cancelScheduledValues(0), gateG.gain.rampTo(1,0.02); $('#fxGate').classList.toggle('on',gateOn); });
   $('#ambVol').addEventListener('input',e=>{ ambLevel=+e.target.value; });
-  $('#fxVerb').addEventListener('click',()=>{ if(!audioReady) return; verbOn=!verbOn; verb.wet.rampTo(verbOn?0.3:0,0.2); $('#fxVerb').classList.toggle('on',verbOn); });
+  $('#fxVerb').addEventListener('click',()=>{ if(!audioReady) return; verbOn=!verbOn; verbSend.gain.rampTo(verbOn?0.45:0,0.2); $('#fxVerb').classList.toggle('on',verbOn); });
   $('#coachPill').addEventListener('click',()=>{ setTab('learn'); if(isMobile()) setSheet(true); else applyCoach(); });
   $('#resetProgress').addEventListener('click',()=>{ if(confirm('Reset all quests and XP? Your saved tracks stay.')){ progress={xp:0,done:{}}; store.set('progress',progress); show.paintPattern=false; show.paintText=false; saveShow(); renderMissions(); } });
   window.addEventListener('resize',()=>{ document.body.classList.toggle('sheet-open',isMobile()&&$('#console').classList.contains('open')); });
   if(window.ResizeObserver) new ResizeObserver(()=>updateViewTargets()).observe($('#console'));
   $('#enterBtn').addEventListener('click',async()=>{
-    try{ await Tone.start(); Tone.context.lookAhead=0.15; }catch(e){}
+    // a 'playback' context uses bigger audio buffers, which trades a little latency for no crackle under load.
+    // Tone's Transport/Draw/Destination exports stay bound to the load-time context, so app code uses Tone.getTransport() etc.
+    try{ const old=Tone.getContext(); Tone.setContext(new Tone.Context({latencyHint:'playback',lookAhead:0.2})); old.dispose(); }catch(e){ console.warn('audio context',e); }
+    try{ await Tone.start(); }catch(e){}
     try{ initAudio(); }catch(e){ console.error(e); toast('Audio could not start in this browser. The visuals still work.','warn'); }
     $('#gate').remove();
     setTimeout(()=>toast('Tip: tap Shigost, the flame cannons, or the round screen'),1600);
