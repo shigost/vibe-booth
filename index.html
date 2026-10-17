@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Vibe Booth</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..700;1,9..144,400..700&family=DM+Sans:opsz,wght@9..40,400..700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tone@14.8.49/build/Tone.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<meta name="description" content="Vibe Booth: a pocket EDM festival on a volcanic island in the Marianas. DJ two decks, make beats, and run the lasers with Shigost.">
+<meta property="og:title" content="Vibe Booth">
+<meta property="og:description" content="DJ with Shigost on a volcanic island in the Marianas. Mix, make beats, and light up the show.">
+<meta name="theme-color" content="#16101f">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🌋</text></svg>">
+<link rel="stylesheet" href="styles.css">
+
+</head>
+<body>
+<div id="stage"><canvas id="three" aria-label="3D volcanic island festival diorama"></canvas></div>
+
+<div class="masthead">
+  <p class="kicker">A pocket festival on a volcanic island in the Marianas</p>
+  <h1>Vibe<br>Booth.</h1>
+  <p class="dek">Shigost has the decks. You have the mixer, the lasers, and the flame cannons.</p>
+  <div class="cams">
+    <button class="glass on" data-cam="diorama">Diorama</button>
+    <button class="glass" data-cam="front">Front row</button>
+    <button class="glass" data-cam="dj">Shigost's view</button>
+  </div>
+</div>
+
+<div class="stats">
+  <button class="glass camBtn" id="camCycle" aria-label="Change camera view">🎥</button>
+  <div class="stat" id="lvlChip"><span class="statLabel">Level</span><b id="lvlName">Bedroom DJ</b><div class="bar"><i id="xpFill"></i></div></div>
+  <div class="stat" id="vibeChip"><span class="statLabel">Crowd</span><b><span id="vibeVal">0</span>% <span class="hypedWord">hyped</span></b><div class="bar vibe"><i id="vibeFill"></i></div></div>
+  <div class="stat tempo"><span class="statLabel">Tempo</span><b><span id="bpmVal">124</span> bpm</b></div>
+</div>
+
+<div class="howto">
+  <p class="howTitle">How to play</p>
+  <p><em>Tap a deck. Slide to blend. Build, then drop.</em></p>
+  <p>Shigost waits on the stage until you press play, then poofs over to the decks. Tap her while she plays and she dances. Tap the volcano, the lava vents, the round screen, the haggan, or the sakman. Drag to spin the diorama; pinch or scroll to zoom.</p>
+</div>
+
+<button class="coachPill" id="coachPill"></button>
+
+<aside class="console" id="console">
+  <button class="handle" id="handle" aria-label="Show more controls"><span></span></button>
+  <div class="perf">
+    <button class="dk" id="pA" data-deck="A"><span class="mini"><i></i></span><span class="dkText"><span class="dkName">Deck A</span><span class="dkMeta">Tap to play</span></span></button>
+    <div class="xf"><div class="xfLab"><span>A</span><span>Crossfade</span><span>B</span></div><input type="range" id="xfader" min="0" max="1" step="0.01" value="0.5" aria-label="Crossfader"></div>
+    <button class="dk" id="pB" data-deck="B"><span class="mini"><i></i></span><span class="dkText"><span class="dkName">Deck B</span><span class="dkMeta">Tap to play</span></span></button>
+  </div>
+  <div class="acts">
+    <button class="act build" id="aBuild">Build</button>
+    <button class="act drop" id="aDrop">Drop</button>
+    <button class="act fire" id="aFire">Flames</button>
+    <button class="act laser" id="aLaser">Lasers</button>
+  </div>
+  <nav class="tabs">
+    <button data-tab="mix" class="on">Mix</button>
+    <button data-tab="studio">Studio</button>
+    <button data-tab="show">Show</button>
+    <button data-tab="learn">Learn</button>
+  </nav>
+
+  <div class="tabBody" id="tab-mix">
+    <div class="chan" id="chanA"></div>
+    <div class="chan" id="chanB"></div>
+    <div class="master">
+      <div class="row"><label>Tempo</label><input type="range" id="tempo" min="80" max="180" step="1" value="124" aria-label="Master tempo"><span class="val" id="tempoVal">124</span></div>
+      <div class="quad"><button class="tog" id="fxEcho">Echo</button><button class="tog" id="fxVerb">Reverb</button><button class="tog" id="fxPhaser">Phaser</button><button class="tog" id="fxGate">Gate</button></div>
+      <div class="row" style="margin-top:8px"><label>Island</label><input type="range" id="ambVol" min="0" max="1" step="0.01" value="0.5" aria-label="Island ambience volume"></div>
+    </div>
+    <p class="tip">Drag a knob up or down to turn it. Double-tap any knob to snap it back to the middle.</p>
+  </div>
+
+  <div class="tabBody" id="tab-studio" hidden>
+    <input class="txt" id="trackName" maxlength="28" aria-label="Track name" style="font-family:'Fraunces',Georgia,serif;font-size:1.1rem;font-weight:600">
+    <div class="formGrid">
+      <label>Start from<select id="tplSel"></select></label>
+      <label>Key<select id="keySel"></select></label>
+      <label>Chords<select id="progSel"></select></label>
+      <label style="grid-column:1 / -1">Sound kit<select id="kitSel"></select></label>
+    </div>
+    <div class="row" style="margin-top:8px"><label>BPM</label><input type="range" id="trackBpm" min="80" max="180" step="1"><span class="val" id="trackBpmVal"></span></div>
+    <div class="row"><label>Swing</label><input type="range" id="trackSwing" min="0" max="0.35" step="0.01" aria-label="Swing"><span class="val" id="trackSwingVal"></span></div>
+    <div class="gridWrap"><div class="grid" id="grid"></div></div>
+    <div class="hint" id="studioHint">Each column is a 16th note, so the grid is one bar. Pick a sound kit, tap a row name to learn what it does, then tap squares to place hits.</div>
+    <div class="btnRow">
+      <button class="btn primary" id="playOnA">Play on Deck A</button>
+      <button class="btn" id="playOnB">Deck B</button>
+      <button class="btn" id="inspire">Surprise me</button>
+      <button class="btn" id="clearTrack">Clear</button>
+      <button class="btn" id="saveTrack">Save to crate</button>
+    </div>
+  </div>
+
+  <div class="tabBody" id="tab-show" hidden>
+    <div class="previewWrap"><div class="preview" id="projPreview"></div></div>
+    <h3>Round screen</h3>
+    <div class="chips" id="patternChips"></div>
+    <h3>Palette</h3>
+    <div class="chips" id="paletteChips"></div>
+    <h3>Screen text</h3>
+    <input class="txt" id="projText" maxlength="16" placeholder="Type your DJ name">
+    <div class="row" style="margin-top:6px"><label>Speed</label><input type="range" id="projSpeed" min="0.2" max="3" step="0.05" aria-label="Visual speed"></div>
+    <h3>Sky</h3>
+    <div class="chips" id="skyChips"></div>
+    <h3>Sail screen <small>on the sakman</small></h3>
+    <div class="chips" id="sailChips"></div>
+    <h3>Lasers</h3>
+    <div class="swatches" id="laserSwatches"></div>
+    <div class="chips" id="laserModes" style="margin-top:8px"></div>
+    <button class="holdBtn" id="sStrobe">Hold for strobe</button>
+    <div class="toggles">
+      <label class="trow">Lasers follow the beat<input type="checkbox" id="tLaserAuto"></label>
+      <label class="trow">Flames fire on every drop<input type="checkbox" id="tFlameAuto"></label>
+      <label class="trow">Screen reacts to bass<input type="checkbox" id="tBass"></label>
+      <label class="trow">Screen flashes every bar<input type="checkbox" id="tBeatStrobe"></label>
+      <label class="trow">Reduce flashing lights<input type="checkbox" id="tReduce"></label>
+    </div>
+  </div>
+
+  <div class="tabBody" id="tab-learn" hidden>
+    <div class="levelCard"><b id="lvlBig">Bedroom DJ</b><p id="lvlNext"></p></div>
+    <h3>Quests <small id="doneCount"></small></h3>
+    <div id="missionList"></div>
+    <h3>Gear guide <small>how this maps to real booths</small></h3>
+    <details><summary>Decks are media players</summary><p>Club booths use a pair of professional media players. Each plays one track, and the big jog wheel nudges, scratches, and cues. At home most people learn on an all-in-one DJ controller connected to DJ software.</p></details>
+    <details><summary>The mixer and its channels</summary><p>The middle of the booth is the DJ mixer. Each channel has a 3-band EQ (Hi, Mid, and Low), a filter knob, and a volume fader, which is exactly what each channel in Mix has here.</p></details>
+    <details><summary>Crossfader</summary><p>Slides between the two sides of the mixer. House and techno DJs often blend slowly with channel faders and EQ, while hip hop and scratch DJs use a sharp crossfader. Both work here.</p></details>
+    <details><summary>EQ and the bass swap</summary><p>Two kicks and two basslines at once turn to mud. Pros cut Low on the incoming track, blend it in, then swap: cut Low on the old track and bring Low back on the new one, right on a phrase change.</p></details>
+    <details><summary>Song structure and phrasing</summary><p>Every track now plays like a real DJ track: an 8-bar intro of drums with the filter opening, a groove, an 8-bar build with a riser, a snare roll, and a one-beat pause, then a 16-bar drop, a breakdown with pads and vocals, a second build and drop, and a drums-and-bass outro. DJs mix in during intros and out during outros, and line up drops on the first beat of a phrase. Each deck shows which section it is in and which bar.</p></details>
+    <details><summary>Hot cues, loops, and rolls</summary><p>Hot cues are saved spots in a track: tap Intro, Build, Drop, or Break to jump there on the next bar. Loop 4 repeats the current 4 bars so you can stretch a groove while you set up the other deck. Holding Roll repeats a short slice of the beat for a stutter, while the track keeps moving underneath, the way slip mode works on real players. Phaser sweeps the whole mix, and Gate chops it into a rhythm.</p></details>
+    <details><summary>Island sounds</summary><p>Under the music you can hear the island: rolling surf, foam, shell chimes on the breeze, and lava crackling (louder when the volcano erupts). The Island kit uses rattling shells for hi-hats, a woody log hit for the snare, and a bass inspired by the belembaotuyan, the CHamoru musical bow with a gourd resonator, whose tone players change by moving the gourd. Every drop is announced with a kulo' call, the triton shell trumpet.</p></details>
+    <details><summary>BPM by genre</summary><p>House 120 to 128, tech house 124 to 128, techno 128 to 140, trance 136 to 140, dubstep 140 (half time), future bass 140 to 160, and drum and bass 170 to 176.</p></details>
+    <details><summary>The Studio grid is a drum machine</summary><p>It works like a classic step-sequencer drum machine: 16 steps make one bar of 4 beats. In music production software this is the same as drawing a one-bar MIDI clip, so patterns you make here carry straight into your own sessions.</p></details>
+    <details><summary>The island and its details</summary><p>The stage is a guma' latte, a house raised on latte stones: haligi pillars topped with tasa capstones, the foundation of CHamoru homes in the Latte period. The lasers fire from kulo' (triton shell trumpets), a sinahi crescent of shell hangs at the peak of the roof, shell-bead garlands line the rafters, and a lusong (stone mortar) and red clay pots sit near the house. Out on the water, a sakman, the fast outrigger sailing canoe Europeans called the flying proa, circles the island with a haggan (sea turtle). Its sail doubles as a screen: Puntan and Fu'una, whose creation story turned Puntan's eyes into the sun and moon and his eyebrows into rainbows; pictographs in the spirit of the cave paintings at Gadao's Cave and Litekyan; and latte stones beneath a sinahi moon.</p></details>
+    <details><summary>Sound kits</summary><p>Garage kits use shuffly 2-step drums (that is what Swing does), warm piano chords, deep subs, and chopped vocal "oohs" that duck under the kick. Riddim kits use half-time drums at 150 bpm and a wobble bass whose filter is swept by an LFO synced to the tempo. Alt pop kits use crunchy guitars and bouncy indie beats. Every kit uses sidechain, where the kick briefly turns the bass and chords down so the groove pumps.</p></details>
+    <details><summary>Show design</summary><p>Festival stages run lasers, CO2, pyro flame cannons, and LED walls, usually programmed by a lighting designer on a lighting console or timecoded to the set. VJs run visuals live with video software. The Show tab is your mini version of that.</p></details>
+    <div class="btnRow"><button class="btn" id="resetProgress">Reset quests and XP</button></div>
+  </div>
+</aside>
+
+<div id="toasts" aria-live="polite"></div>
+
+<div id="gate">
+  <div class="gateCard">
+    <h1>Vibe<br>Booth.</h1>
+    <p>Håfa adai! Shigost is warming up in a guma' latte on a volcanic island in the Marianas. Mix two decks, make beats in the Studio, and run the lasers, flames, and round screen. Quests teach real DJ moves as you play.</p>
+    <button class="enter" id="enterBtn">Enter the booth</button>
+    <p class="warnNote">Sound on. This page has flashing lights; switch on "Reduce flashing lights" in Show if you need to.</p>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
