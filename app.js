@@ -195,7 +195,7 @@ let vibe=0, ambLevel=0.5;
 function addVibe(n){ vibe=clamp(vibe+n,0,100); if(vibe>=80) complete('crowd'); }
 
 /* ================= AUDIO ================= */
-let audioReady=false, cross, revCross, roomVerb, echo, verb, verbSend, master, limiter, analyser, riserNoise, riserFilter, riserGain, roll, clock;
+let uwLP=null, audioReady=false, cross, revCross, roomVerb, echo, verb, verbSend, master, limiter, analyser, riserNoise, riserFilter, riserGain, roll, clock;
 let globalStep=0, echoOn=false, verbOn=false, riserActive=false, buildHype=false, lastDrop=-1e9, xfVal=0.5, xfSide=null;
 const decks={}; let phaser, gateG, phaserOn=false, gateOn=false, amb=null, ambVerb=null; const GATE=P('x.x.xx.x.x.xx.x.');
 /* ---------- sound design: each deck builds the voices its kit needs ---------- */
@@ -448,7 +448,8 @@ function initAudio(){
   const bus=new Tone.Gain(1);
   cross.connect(echo); revCross.chain(roomVerb,echo);
   echo.connect(bus); echo.chain(verbSend,verb,bus);
-  bus.chain(phaser,gateG,master,glue,limiter,Tone.getDestination());
+  uwLP=new Tone.Filter({type:'lowpass',frequency:20000,Q:0.4});
+  bus.chain(phaser,gateG,master,glue,limiter,uwLP,Tone.getDestination());
   analyser=new Tone.Analyser('fft',64); limiter.connect(analyser);
   decks.A=new Deck('A',cross.a,revCross.a); decks.B=new Deck('B',cross.b,revCross.b);
   riserFilter=new Tone.Filter({type:'highpass',frequency:300,Q:2}); riserGain=new Tone.Gain(0); riserNoise=new Tone.Noise('white');
@@ -470,7 +471,7 @@ function initAudio(){
 }
 function startAmbience(){
   // the island itself: rolling surf, a hiss of foam, shell chimes on the breeze, crackling lava
-  amb=new Tone.Gain(0).toDestination(); amb.gain.rampTo(0.5,3);
+  amb=new Tone.Gain(0).connect(uwLP||Tone.getDestination()); amb.gain.rampTo(0.5,3);
   const ocean=new Tone.Noise('brown'), oF=new Tone.Filter(750,'lowpass'), swell=new Tone.Gain(0.4), pan=new Tone.AutoPanner(0.04).start(); pan.depth.value=0.5;
   new Tone.LFO(0.085,0.12,0.95).start().connect(swell.gain); ocean.chain(oF,swell,pan,amb); ocean.volume.value=-9; ocean.start();
   const surf=new Tone.Noise('pink'), sF=new Tone.Filter({type:'bandpass',frequency:2200,Q:0.5}), sG=new Tone.Gain(0);
@@ -1085,7 +1086,7 @@ function waveHjs(x,z,t){
 function randOcean(d0,d1,tries){ for(let k=0;k<(tries||400);k++){ const x=(Math.random()-0.5)*(SLAB.w-1.2), z=OCZ+(Math.random()-0.5)*(SLAB.d-1.2); const d=shoreD(x,z); if(d>=d0&&d<=d1) return [x,z,d]; } return null; }
 function makeWaterSurface(hTex){
   const u={uTime:{value:0},uNight:{value:0},uBass:{value:0},uH:{value:hTex},uSun:{value:new THREE.Vector3(-0.45,0.8,0.42).normalize()},
-    uRip:{value:[0,1,2,3].map(()=>new THREE.Vector4(0,0,-99,0))},uRipG:{value:[0,0,0,0]}};
+    uRip:{value:[0,1,2,3].map(()=>new THREE.Vector4(0,0,-99,0))},uRipG:{value:[0,0,0,0]},uUw:{value:0},uUwFog:{value:new THREE.Color()}};
   const g=new THREE.PlaneGeometry(SLAB.w,SLAB.d,Math.round(SLAB.w*4.5),Math.round(SLAB.d*4.5)); g.rotateX(-Math.PI/2);
   // up to four ripple rings (x, z, start time, strength), each optionally glowing at night: taps and beats, never a deforming sea
   const RIP=`uniform vec4 uRip[4]; uniform float uRipG[4];
@@ -1094,7 +1095,7 @@ function makeWaterSurface(hTex){
   const HS=`uniform sampler2D uH; float terr(vec2 w){ vec2 uv=vec2((w.x+${(SLAB.w/2).toFixed(2)})/${SLAB.w.toFixed(1)},(w.y-(${(OCZ-SLAB.d/2).toFixed(2)}))/${SLAB.d.toFixed(1)}); return texture2D(uH,uv).r*5.-4.5; }
     float reefM(vec2 w){ vec2 uv=vec2((w.x+${(SLAB.w/2).toFixed(2)})/${SLAB.w.toFixed(1)},(w.y-(${(OCZ-SLAB.d/2).toFixed(2)}))/${SLAB.d.toFixed(1)}); return texture2D(uH,uv).g; }
     float waveH(vec2 p,float t,float depth){ float h=0.06*sin(dot(p,vec2(0.55,0.25))+t*1.3)+0.04*sin(dot(p,vec2(-0.3,0.7))*1.6+t*1.9)+0.025*sin(dot(p,vec2(0.8,-0.5))*2.7+t*2.6)+0.015*sin(dot(p,vec2(-0.6,-0.6))*4.1+t*3.3); return h*(0.2+0.8*smoothstep(0.05,2.,depth)); }`;
-  const m=new THREE.ShaderMaterial({uniforms:u,transparent:true,
+  const m=new THREE.ShaderMaterial({uniforms:u,transparent:true,side:THREE.DoubleSide,
     vertexShader:HS+`
       uniform float uTime; varying vec2 vP; varying vec3 vN; varying vec3 vW; varying float vH; varying float vD; varying float vNear;
       ${RIP}
@@ -1106,11 +1107,18 @@ function makeWaterSurface(hTex){
         vN=normalize(mat3(modelMatrix)*normalize(vec3(-hx/e,1.,-hz/e))); p.y+=h; vH=h;
         vec4 w=modelMatrix*vec4(p,1.); vW=w.xyz; gl_Position=projectionMatrix*viewMatrix*w; }`,
     fragmentShader:NOISE_GLSL+HS+`
-      uniform float uTime,uNight,uBass; uniform vec3 uSun; varying vec2 vP; varying vec3 vN; varying vec3 vW; varying float vH; varying float vD; varying float vNear;
+      uniform float uTime,uNight,uBass,uUw; uniform vec3 uSun,uUwFog; varying vec2 vP; varying vec3 vN; varying vec3 vW; varying float vH; varying float vD; varying float vNear;
       ${RIP}
       void main(){
         float depth=-0.31-terr(vP);
         if(depth<-0.06) discard;
+        if(!gl_FrontFacing){
+          vec3 vv=normalize(vW-cameraPosition); float up=clamp(vv.y,0.,1.), win=smoothstep(0.62,0.86,up);
+          float wn=noise(vP*2.2+vec2(uTime*0.5,-uTime*0.35))*0.6+noise(vP*5.1-vec2(uTime*0.8,uTime*0.6))*0.4;
+          vec3 c=mix(vec3(0.07,0.42,0.5),vec3(0.82,0.97,1.),win*(0.75+0.35*wn))+vec3(0.15,0.2,0.2)*smoothstep(0.55,0.85,wn)*(0.3+0.7*win);
+          c*=mix(1.,0.3,uNight); c=mix(c,uUwFog,smoothstep(3.,40.,length(vW-cameraPosition))*(1.-win*0.6));
+          gl_FragColor=vec4(c,0.94); return;
+        }
         vec3 col=mix(vec3(0.37,0.89,0.86),vec3(0.13,0.71,0.79),smoothstep(0.05,0.7,depth));
         col=mix(col,vec3(0.12,0.5,0.72),smoothstep(0.7,1.8,depth));
         col=mix(col,vec3(0.04,0.25,0.48),smoothstep(1.8,3.6,depth));
@@ -1119,7 +1127,9 @@ function makeWaterSurface(hTex){
         vec3 n=normalize(vN), v=normalize(cameraPosition-vW), hh=normalize(uSun+v);
         { vec2 q=vP*0.4+vec2(uTime*0.06,uTime*0.04); float d0=noise(q), nx=noise(q+vec2(0.6,0.))-d0, nz=noise(q+vec2(0.,0.6))-d0; n=normalize(n+vec3(-nx,0.,-nz)*0.35*(1.-vNear)*(0.3+0.7*far)); }
         float diff=clamp(dot(n,uSun),0.,1.), spec=pow(max(dot(n,hh),0.),110.)*(1.-uNight*0.85), fres=pow(1.-max(dot(n,v),0.),3.);
-        col=col*(0.74+0.36*diff)+fres*vec3(0.6,0.8,1.)*0.28+spec*1.3;
+        col=col*(0.74+0.36*diff)+spec*1.3;
+        // at grazing angles the sea mirrors the sky
+        col=mix(col,vec3(0.72,0.86,0.96)*mix(1.,0.3,uNight),fres*0.6);
         float fn=noise(vP*3.2+vec2(uTime*0.35,uTime*0.22));
         float lap=0.16+0.1*sin(uTime*1.5+vP.x*0.45+vP.y*0.35);
         float shore=1.-smoothstep(0.,lap,depth);
@@ -1131,7 +1141,7 @@ function makeWaterSurface(hTex){
         col*=mix(1.,0.42,uNight);
         float bio=uNight*(0.25+uBass*1.1)*smoothstep(0.55,0.88,noise(vP*1.6-uTime*0.3))*far*(1.-smoothstep(22.,32.,length(vP-vec2(0.,${OCZ.toFixed(2)})))); // glows around the island, not the open sea
         col+=vec3(0.1,0.85,1.)*(bio+rp.y*uNight*1.4)+uNight*vec3(0.,0.03,0.07);
-        float a=mix(0.22,0.6,smoothstep(0.05,1.6,depth)); a=mix(a,0.85,smoothstep(2.,4.,depth)); a=min(0.9,a+rm*0.12);
+        float a=mix(0.22,0.6,smoothstep(0.05,1.6,depth)); a=mix(a,1.,fres*0.7); a=mix(a,0.85,smoothstep(2.,4.,depth)); a=min(0.9,a+rm*0.12);
         a*=smoothstep(-0.06,0.03,depth);
         gl_FragColor=vec4(col,max(a,foam*smoothstep(-0.06,0.02,depth)));
       }`});
@@ -1303,12 +1313,20 @@ function psUpdate(o,dt,r,g,b,k){ for(let i=0;i<o.n;i++){ if(o.age[i]>=o.life[i])
   o.geo.attributes.position.needsUpdate=true; o.geo.attributes.color.needsUpdate=true; }
 const _wv=new THREE.Vector3();
 function updateEdges(dt,T){
-  // light shafts sway in the water column
-  isl.rays.forEach((r,i)=>{ r.material.opacity=(0.1+0.08*Math.sin(T*0.7+i*1.9))*(1-night*0.5)+night*lv.bass*0.15; r.rotation.z=Math.sin(T*0.3+i)*0.06; });
-  // bubbles rising through the water
-  const bp=isl.bub.geometry.attributes.position;
-  for(let i=0;i<bp.count;i++){ let y=bp.getY(i)+dt*(0.3+(i%5)*0.08); if(y>-0.45) y=-4.1; bp.setY(i,y); bp.setX(i,bp.getX(i)+Math.sin(T*2+i)*0.002); }
-  bp.needsUpdate=true; isl.bub.material.opacity=0.45+night*0.4;
+  // underwater only: light shafts slant down from the surface around the camera, bubbles rise and motes drift
+  const uwOn=uwK>0.02, cp=camera.position; isl.bub.visible=uwOn; isl.rays.forEach(r=>r.visible=uwOn);
+  if(uwOn){
+    isl.rays.forEach((r,i)=>{ const a=i*2.4+T*0.02, d=3+(i*1.7)%8; r.position.set(cp.x+Math.cos(a)*d,-0.31-r.geometry.parameters.height*1.4/2,cp.z+Math.sin(a)*d);
+      r.scale.y=1.4; r.rotation.set(0,Math.atan2(cp.x-r.position.x,cp.z-r.position.z),0.18+Math.sin(T*0.3+i)*0.06);
+      r.material.opacity=uwK*(0.1+0.07*Math.sin(T*0.7+i*1.9))*(1-night*0.7); });
+    const bp=isl.bub.geometry.attributes.position;
+    for(let i=0;i<bp.count;i++){ let x=bp.getX(i), y=bp.getY(i), z=bp.getZ(i); const bub=i%3===0;
+      y+=dt*(bub?0.5+(i%5)*0.12:0.03*Math.sin(T*0.5+i)); x+=Math.sin(T*(bub?3:0.4)+i)*(bub?0.004:0.003); z+=Math.cos(T*0.37+i)*0.002;
+      if(y>-0.4||Math.hypot(x-cp.x,z-cp.z)>8||y<terrainH(x,z)){ const a=Math.random()*6.28, rr=0.8+Math.random()*7; x=cp.x+Math.cos(a)*rr; z=cp.z+Math.sin(a)*rr;
+        const fl=terrainH(x,z)+0.1; y=bub?fl+Math.random()*0.5:fl+Math.random()*Math.max(0.1,-0.45-fl); }
+      bp.setXYZ(i,x,y,z); }
+    bp.needsUpdate=true; isl.bub.material.opacity=uwK*(0.55+night*0.3);
+  }
   // steam where lava meets the sea
   isl.steamT-=dt;
   if(isl.steamT<=0){ isl.steamT=0.06; isl.rivers.forEach(r=>psEmit(isl.steam,r.end.x+(Math.random()-0.5)*0.8,-0.15,r.end.z+(Math.random()-0.5)*0.8,(Math.random()-0.5)*0.2,0.7+Math.random()*0.6+isl.erupt*0.4,(Math.random()-0.5)*0.2,1.6+Math.random())); }
@@ -1509,6 +1527,9 @@ const FAR_ISLES=[
   {id:'islet', kind:'rock',   a:5.55,d:100,r:6, h:7.5,seed:5},
 ];
 const farWorld={};
+// how far under the waterline the camera is: 0 above, 1 below, blended across the waves so the transition is smooth
+let uwK=0;
+const UW_FOG={day:C('#1f8c9a'),night:C('#10264a')}, _uwc=new THREE.Color();
 function farIsleGeo(o){
   const NS=48, NR=16, pos=[], col=[], idx=[], c=new THREE.Color(), hz=(t,th)=>{ const n=0.12*Math.sin(th*3+o.seed)+0.07*Math.sin(th*7+o.seed*2.3)+0.04*Math.sin(th*13+o.seed);
     if(o.kind==='volcano') return o.h*Math.pow(Math.max(0,1-t),1.35)*(1+n)-(t<0.07?o.h*0.08:0);
@@ -1535,13 +1556,15 @@ function farIsleGeo(o){
 }
 function buildFarWorld(){
   const sunDir=sun.position.clone().normalize(), U={uNight:{value:0},uTime:{value:0},uSun:{value:sunDir},
-    uZen:{value:FAR.zen[0].clone()},uHaze:{value:FAR.haze[0].clone()},uSea:{value:FAR.sea[0].clone()}};
+    uZen:{value:FAR.zen[0].clone()},uHaze:{value:FAR.haze[0].clone()},uSea:{value:FAR.sea[0].clone()},uUw:{value:0},uUwCol:{value:new THREE.Color()}};
   farWorld.u=U;
+  // scene fog: only underwater for now (blue-green, close); above water it sits out past everything
+  scene.fog=new THREE.Fog(0xffffff,2000,3000);
   // sky dome: follows the camera, drawn first and behind everything
   const sky=new THREE.Mesh(new THREE.SphereGeometry(800,32,16),new THREE.ShaderMaterial({uniforms:U,side:THREE.BackSide,depthWrite:false,depthTest:false,
     vertexShader:'varying vec3 vD; void main(){ vD=normalize((modelMatrix*vec4(position,1.)).xyz-cameraPosition); gl_Position=projectionMatrix*viewMatrix*modelMatrix*vec4(position,1.); }',
-    fragmentShader:'uniform vec3 uZen,uHaze,uSun; uniform float uNight; varying vec3 vD; void main(){ vec3 d=normalize(vD); float e=max(d.y,0.); vec3 c=mix(uHaze,uZen,pow(e,0.5));'+
-      ' c+=vec3(1.,0.93,0.78)*(pow(max(dot(d,uSun),0.),24.)*0.35+pow(max(dot(d,uSun),0.),400.)*0.6)*(1.-uNight); gl_FragColor=linearToOutputTexel(vec4(c,1.)); }'}));
+    fragmentShader:'uniform vec3 uZen,uHaze,uSun,uUwCol; uniform float uNight,uUw; varying vec3 vD; void main(){ vec3 d=normalize(vD); float e=max(d.y,0.); vec3 c=mix(uHaze,uZen,pow(e,0.5));'+
+      ' c+=vec3(1.,0.93,0.78)*(pow(max(dot(d,uSun),0.),24.)*0.35+pow(max(dot(d,uSun),0.),400.)*0.6)*(1.-uNight); c=mix(c,uUwCol,uUw); gl_FragColor=linearToOutputTexel(vec4(c,1.)); }'}));
   sky.renderOrder=-1000; sky.frustumCulled=false; scene.add(sky); farWorld.sky=sky;
   // distant islands: simple sun shading, dimmed at night, fading into the haze with distance
   const im=new THREE.ShaderMaterial({uniforms:U,vertexColors:true,
@@ -1555,6 +1578,11 @@ function updateFarWorld(T){
   u.uNight.value=night; u.uTime.value=T;
   u.uZen.value.copy(FAR.zen[0]).lerp(FAR.zen[1],night); u.uHaze.value.copy(FAR.haze[0]).lerp(FAR.haze[1],night); u.uSea.value.copy(FAR.sea[0]).lerp(FAR.sea[1],night);
   farWorld.sky.position.copy(camera.position);
+  const cp=camera.position, wl=-0.31+waveHjs(cp.x,cp.z,T); uwK=sstep(0.12,-0.12,cp.y-wl);
+  _uwc.copy(UW_FOG.day).lerp(UW_FOG.night,night); u.uUw.value=uwK; u.uUwCol.value.copy(_uwc);
+  // fog colour is applied after the sRGB encode, so it takes the sRGB value of the same colour
+  scene.fog.color.copy(_uwc).convertLinearToSRGB(); const fk=Math.pow(1-uwK,6); scene.fog.near=2+2000*fk; scene.fog.far=28+3000*fk;
+  if(isl.wu){ isl.wu.uUw.value=uwK; isl.wu.uUwFog.value.copy(scene.fog.color); }
 }
 function init3D(){
   const canvas=$('#three');
@@ -1620,6 +1648,10 @@ function init3D(){
   const mantM=applyUnderwater(glowify(new THREE.MeshStandardMaterial({color:0xffffff,roughness:0.3})));
   const mant=new THREE.InstancedMesh(CG.mantle,mantM,clamA.count); const mt4=new THREE.Matrix4();
   for(let i=0;i<clamA.count;i++){ clamA.getMatrixAt(i,mt4); mant.setMatrixAt(i,mt4); mant.setColorAt(i,C(clamCols[i%3])); } inner.add(mant); isl.coralMats.push(mantM); bakeReefMask();
+  { let best=null, bs=-1; (isl.coralPts||[]).forEach(([x,y,z])=>{ const a=Math.atan2(z-OCZ,x), sd=shoreD(x,z); if(Math.abs(a-Math.PI/2)>0.9||sd<shelfD(4.6)||sd>shelfD(5.4)) return;
+      let n=0; isl.coralPts.forEach(q=>{ if(Math.hypot(q[0]-x,q[2]-z)<2.2) n++; }); if(n>bs){ bs=n; best=[x,y,z]; } });
+    if(best){ const [x,,z]=best, ty=Math.min(-0.95,terrainH(x,z)+0.55), a=Math.atan2(z-OCZ,x);
+      PRESETS.reef={tx:x,ty,tz:z,r:4.5,theta:Math.atan2(Math.cos(a),Math.sin(a)),phi:1.42,fov:55}; } }
   // detailed reef fish: clownfish by the anemones, Moorish idols, butterflyfish, parrotfish
   isl.fishM=fishMaterial(); isl.fishSets=[];
   FISH.forEach(sp=>{ const im=new THREE.InstancedMesh(fishGeo(sp),isl.fishM,sp.n); inner.add(im);
@@ -1887,7 +1919,7 @@ function init3D(){
 /* camera */
 const cam={tx:0,ty:1.2,tz:-3,r:62,theta:0.6,phi:1.0,fov:30};
 const camT=Object.assign({},cam);
-const PRESETS={island:{tx:0,ty:1.2,tz:-3,r:62,theta:0.6,phi:1.0,fov:30},front:{tx:0,ty:3.3,tz:-3.6,r:12,theta:0.2,phi:1.46,fov:46},dj:{tx:-1.4,ty:1.2,tz:4.0,r:11.19,theta:3.112,phi:1.147,fov:52}};
+const PRESETS={island:{tx:0,ty:1.2,tz:-3,r:62,theta:0.6,phi:1.0,fov:30},front:{tx:0,ty:3.3,tz:-3.6,r:12,theta:0.2,phi:1.46,fov:46},dj:{tx:-1.4,ty:1.2,tz:4.0,r:11.19,theta:3.112,phi:1.147,fov:52},reef:{tx:0,ty:-1.6,tz:13,r:4.5,theta:0,phi:1.42,fov:55}};
 const view={w:1,h:1,c:0,s:0,cT:0,sT:0};
 function updateViewTargets(){
   if(isMobile()){ view.cT=0; view.sT=$('#console').offsetHeight*0.92; }
@@ -1972,7 +2004,7 @@ function setupPointer(canvas){
       else if(pts.size===2){ const a=[...pts.values()]; const d=Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y); if(pinch>0) pov.fovT=clamp(pov.fovT*pinch/d,35,70); pinch=d; pov.idle=0; }
       return;
     }
-    if(pts.size===1&&(!down||down.moved>6)){ camT.theta-=dx*0.006; camT.phi=clamp(camT.phi-dy*0.005,0.3,1.55); $$('.cams button').forEach(b=>b.classList.remove('on')); }
+    if(pts.size===1&&(!down||down.moved>6)){ camT.theta-=dx*0.006; camT.phi=clamp(camT.phi-dy*0.005,0.3,camT.r<30?2.05:1.55); $$('.cams button').forEach(b=>b.classList.remove('on')); }
     else if(pts.size===2){ const a=[...pts.values()]; const d=Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y); if(pinch>0) camT.r=clamp(camT.r*pinch/d,7,95); pinch=d; }
   });
   const up=e=>{
@@ -2045,6 +2077,7 @@ function updateNuts(dt){ nuts.forEach(c=>{ if(c.life<=0) return; c.life-=dt; con
 
 const dayHemi=C('#fff6fb'), nightHemi=C('#7d6bd6'), dayGround=C('#c4b4e0'), nightGround=C('#2a2050');
 const tmpC=new THREE.Color(), laserCol=new THREE.Color(), dmy2=new THREE.Object3D();
+let camColR=1e9;
 function update3D(dt,T){
   const k=1-Math.exp(-dt*3.2);
   for(const key in cam) cam[key]+=(camT[key]-cam[key])*k;
@@ -2052,6 +2085,13 @@ function update3D(dt,T){
   const e=vibe/100, inPOV=povActive();
   if(!inPOV){
     camera.position.set(cam.tx+cam.r*Math.sin(cam.phi)*Math.sin(cam.theta),cam.ty+cam.r*Math.cos(cam.phi),cam.tz+cam.r*Math.sin(cam.phi)*Math.cos(cam.theta));
+    // collision: if the line from the target out to the camera dips into the island or seabed, pull the camera in
+    // (quickly when closing in, gently when it can move back out), then keep it at least 0.3 above the surface
+    { const p=camera.position; let lim=cam.r;
+      for(let s=1;s<=12;s++){ const f=s/12, x=cam.tx+(p.x-cam.tx)*f, y=cam.ty+(p.y-cam.ty)*f, z=cam.tz+(p.z-cam.tz)*f; if(y<surfRaw(x,z)+0.3){ lim=cam.r*Math.max(0.12,(s-1)/12); break; } }
+      camColR+=(lim-camColR)*Math.min(1,dt*(lim<camColR?25:3)); const rr=Math.min(cam.r,camColR);
+      p.set(cam.tx+(p.x-cam.tx)*rr/cam.r,cam.ty+(p.y-cam.ty)*rr/cam.r,cam.tz+(p.z-cam.tz)*rr/cam.r);
+      p.y=Math.max(p.y,surfRaw(p.x,p.z)+0.3); }
     camera.lookAt(cam.tx,cam.ty,cam.tz);
     // beat pulse and volcano rumble: small camera offsets, scaled by motionK()
     camFx.pulse=Math.max(0,camFx.pulse-dt*5); camFx.shake=Math.max(0,camFx.shake-dt*0.8);
@@ -2114,7 +2154,7 @@ function update3D(dt,T){
   duck.children.forEach(f=>{ if(f.userData.flip!==undefined) f.rotation.z=Math.sin(T*3+f.userData.flip*1.6)*0.35; });
   if(duck.userData.spin){ duck.userData.spin=Math.max(0,duck.userData.spin-dt); duck.rotation.y+=duck.userData.spin*12; duck.position.y+=Math.sin(duck.userData.spin*Math.PI)*0.4; }
   balloon.userData.a=(balloon.userData.a||2)-dt*(0.04+(balloon.userData.boost||0)*0.06); balloon.userData.boost=Math.max(0,(balloon.userData.boost||0)-dt);
-  { const bp=(a)=>{ const r=islandR(a)+shelfD(4.2)+2; return [Math.cos(a)*r,OCZ+Math.sin(a)*r]; };
+  { const bp=(a)=>{ const r=islandR(a)+shelfD(4.2)+7; return [Math.cos(a)*r,OCZ+Math.sin(a)*r]; };
     const a=balloon.userData.a, [bx,bz]=bp(a), [nx,nz]=bp(a-0.015), h=waveHjs(bx,bz,T), hx=(waveHjs(bx+0.6,bz,T)-h)/0.6, hz=(waveHjs(bx,bz+0.6,T)-h)/0.6;
     balloon.userData.yaw=balloon.userData.yaw===undefined?Math.atan2(-(nz-bz),nx-bx):balloon.userData.yaw;
     let ty=Math.atan2(-(nz-bz),nx-bx), dy=((ty-balloon.userData.yaw+Math.PI)%(Math.PI*2)+Math.PI*2)%(Math.PI*2)-Math.PI; balloon.userData.yaw+=dy*Math.min(1,dt*2);
@@ -2241,6 +2281,7 @@ function frame(now){
   update3D(dt,T);
   uiT+=dt;
   if(uiT>0.1){ uiT=0; if(amb){ const al=ambLevel*(anyPlaying()?0.45:1); amb.gain.rampTo(al,0.4); if(ambVerb) ambVerb.gain.rampTo(al*0.8,0.4); }
+    if(uwLP) uwLP.frequency.rampTo(20000*Math.pow(650/20000,uwK),0.25);
     $('#vibeFill').style.width=vibe+'%'; $('#vibeVal').textContent=Math.round(vibe);
     const rs=document.documentElement.style;
     rs.setProperty('--sky1',mixRGB(SKY.d1,SKY.n1,night)); rs.setProperty('--sky2',mixRGB(SKY.d2,SKY.n2,night));
@@ -2433,8 +2474,8 @@ function bindGlobal(){
   }));
   $('#handle').addEventListener('click',()=>setSheet(!$('#console').classList.contains('open')));
   $$('.cams button').forEach(b=>b.addEventListener('click',()=>setPreset(b.dataset.cam)));
-  let camIdx=0; const camOrder=['island','front','dj'], camNames={island:'Island view',front:'Front row',dj:"Shigost's view"};
-  $('#camCycle').addEventListener('click',()=>{ camIdx=(camIdx+1)%3; setPreset(camOrder[camIdx]); toast(camNames[camOrder[camIdx]]); });
+  let camIdx=0; const camOrder=['island','front','dj','reef'], camNames={island:'Island view',front:'Front row',dj:"Shigost's view",reef:'Reef view'};
+  $('#camCycle').addEventListener('click',()=>{ camIdx=(camIdx+1)%camOrder.length; setPreset(camOrder[camIdx]); toast(camNames[camOrder[camIdx]]); });
   $('#pA').addEventListener('click',()=>{ if(audioReady) togglePlay(decks.A); });
   $('#pB').addEventListener('click',()=>{ if(audioReady) togglePlay(decks.B); });
   $('#aBuild').addEventListener('click',()=>{ if(audioReady) startRiser(); });
