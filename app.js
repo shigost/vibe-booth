@@ -954,22 +954,25 @@ function mergeGeos(parts){
   const cat=a=>{ const o=new Float32Array(a.reduce((s,x)=>s+x.length,0)); let k=0; a.forEach(x=>{o.set(x,k);k+=x.length;}); return o; };
   const out=new THREE.BufferGeometry(); out.setAttribute('position',new THREE.BufferAttribute(cat(pos),3)); out.setAttribute('normal',new THREE.BufferAttribute(cat(nor),3)); return out;
 }
-// soft body material for the crowd: warm off-white, matte with a faint fabric sheen, a knit-like bump from object-space
-// position (the merged geometry has no UVs), baked AO in the vertex colours, and a soft brightness cap so night washes,
-// strobes, and bass-driven lights can tint the characters but never make them glow
-function softBodyMat(env){
-  const m=new THREE.MeshPhysicalMaterial({color:C('#efe6d9'),vertexColors:true,roughness:0.8,metalness:0,clearcoat:0.06,clearcoatRoughness:0.7,envMap:env,envMapIntensity:0.35});
-  m.sheen=new THREE.Color(0.2,0.18,0.16);
+// soft body material for the crowd, matching Shigost's smooth matte look: near-neutral white, rough, no reflections,
+// baked AO in the vertex colours, an ambient tint from the surroundings (sky blue from above, grass and sand from below,
+// shifting to the night palette), and a soft brightness cap so night washes, strobes, and bass-driven lights tint but never glow
+const BODY_TINT={sky:[C('#a9d2ff'),C('#7d6bd6')],ground:[C('#c9dfa2'),C('#2a2050')]};
+function softBodyMat(){
+  const m=new THREE.MeshStandardMaterial({color:C('#f4f2ee'),vertexColors:true,roughness:0.92,metalness:0});
+  const u=m.userData.tint={uTSky:{value:new THREE.Color()},uTGround:{value:new THREE.Color()}};
   m.onBeforeCompile=sh=>{
-    sh.vertexShader='varying vec3 vFab;\n'+sh.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\n vFab=position;');
-    sh.fragmentShader='varying vec3 vFab;\nfloat fabH(vec3 p){ float k=150.; return 0.5*sin(p.y*k)+0.5*sin((p.x+p.z)*k*0.71+sin(p.y*k*0.5)*1.3); }\n'+sh.fragmentShader
-      // knit bump via screen-space derivatives (like three's bump map), faded out where the pattern is finer than a pixel
-      .replace('#include <normal_fragment_maps>','#include <normal_fragment_maps>\n { float fbH=fabH(vFab), fbAA=clamp(1.-length(fwidth(vFab))*60.,0.,1.); vec3 fbSX=dFdx(-vViewPosition), fbSY=dFdy(-vViewPosition); vec3 fbR1=cross(fbSY,normal), fbR2=cross(normal,fbSX); float fbDet=dot(fbSX,fbR1); vec3 fbG=sign(fbDet)*(dFdx(fbH)*fbR1+dFdy(fbH)*fbR2); normal=normalize(abs(fbDet)*normal-fbG*0.0012*fbAA); }')
+    Object.assign(sh.uniforms,u);
+    sh.fragmentShader='uniform vec3 uTSky; uniform vec3 uTGround;\n'+sh.fragmentShader
+      .replace('#include <lights_fragment_maps>','#include <lights_fragment_maps>\n { vec3 fbN=inverseTransformDirection(normal,viewMatrix); irradiance+=mix(uTGround,uTSky,0.5+0.5*fbN.y)*PI; }')
       // soft knee: light above 0.72x the surface colour rolls off toward 1.3x it, so coloured washes tint but never bloom
       .replace('#include <output_fragment>','{ vec3 fbCap=diffuseColor.rgb*1.3, fbKnee=fbCap*0.72; outgoingLight=mix(outgoingLight,fbKnee+(fbCap-fbKnee)*(1.-exp(-(outgoingLight-fbKnee)/max(fbCap-fbKnee,vec3(1e-3)))),step(fbKnee,outgoingLight)); }\n#include <output_fragment>');
   };
   return m;
 }
+function updateBodyTint(m,night){ const u=m.userData.tint, k=0.32;
+  u.uTSky.value.copy(BODY_TINT.sky[0]).lerp(BODY_TINT.sky[1],night).multiplyScalar(k*lerp(1,0.6,night));
+  u.uTGround.value.copy(BODY_TINT.ground[0]).lerp(BODY_TINT.ground[1],night).multiplyScalar(k*0.7*lerp(1,0.6,night)); }
 // bakes soft ambient occlusion into vertex colours: darker near the ground, where limbs meet the body, and under the arms.
 // limbs are spheres [x,y,z,r]; body(x,y) returns the nearest body sphere for a vertex at that height; hgt is the body's height
 function bakeBodyAO(geo,limbs,body,hgt){
@@ -1781,9 +1784,9 @@ function init3D(){
 }
 
 /* camera */
-const cam={tx:0,ty:1.2,tz:-3,r:70,theta:0.6,phi:1.0,fov:30};
+const cam={tx:0,ty:1.2,tz:-3,r:88,theta:0.6,phi:1.0,fov:30};
 const camT=Object.assign({},cam);
-const PRESETS={diorama:{tx:0,ty:1.2,tz:-3,r:70,theta:0.6,phi:1.0,fov:30},front:{tx:0,ty:3.3,tz:-3.6,r:12,theta:0.2,phi:1.46,fov:46},dj:{tx:-1.4,ty:1.2,tz:4.0,r:11.19,theta:3.112,phi:1.147,fov:52}};
+const PRESETS={diorama:{tx:0,ty:1.2,tz:-3,r:88,theta:0.6,phi:1.0,fov:30},front:{tx:0,ty:3.3,tz:-3.6,r:12,theta:0.2,phi:1.46,fov:46},dj:{tx:-1.4,ty:1.2,tz:4.0,r:11.19,theta:3.112,phi:1.147,fov:52}};
 const view={w:1,h:1,c:0,s:0,cT:0,sT:0};
 function updateViewTargets(){
   if(isMobile()){ view.cT=0; view.sT=$('#console').offsetHeight*0.92; }
@@ -1869,7 +1872,7 @@ function setupPointer(canvas){
       return;
     }
     if(pts.size===1&&(!down||down.moved>6)){ camT.theta-=dx*0.006; camT.phi=clamp(camT.phi-dy*0.005,0.3,1.55); $$('.cams button').forEach(b=>b.classList.remove('on')); }
-    else if(pts.size===2){ const a=[...pts.values()]; const d=Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y); if(pinch>0) camT.r=clamp(camT.r*pinch/d,7,70); pinch=d; }
+    else if(pts.size===2){ const a=[...pts.values()]; const d=Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y); if(pinch>0) camT.r=clamp(camT.r*pinch/d,7,95); pinch=d; }
   });
   const up=e=>{
     if(down&&pts.size===1&&down.moved<8&&performance.now()-down.t<450){ const o=pick(e.clientX,e.clientY); if(o) o.userData.tap(); }
@@ -1877,7 +1880,7 @@ function setupPointer(canvas){
   };
   canvas.addEventListener('pointerup',up);
   canvas.addEventListener('pointercancel',e=>{ pts.delete(e.pointerId); down=null; });
-  canvas.addEventListener('wheel',e=>{ e.preventDefault(); if(povActive()){ pov.fovT=clamp(pov.fovT*(1+e.deltaY*0.001),35,70); return; } camT.r=clamp(camT.r*(1+e.deltaY*0.001),7,70); },{passive:false});
+  canvas.addEventListener('wheel',e=>{ e.preventDefault(); if(povActive()){ pov.fovT=clamp(pov.fovT*(1+e.deltaY*0.001),35,70); return; } camT.r=clamp(camT.r*(1+e.deltaY*0.001),7,95); },{passive:false});
 }
 
 /* jelly squish */
