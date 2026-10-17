@@ -127,7 +127,7 @@ const MISSIONS=[
 ];
 const LEVELS=[[0,'Bedroom DJ'],[150,'Warm-up Act'],[400,'Club Resident'],[750,'Tour Support'],[1150,'Festival Headliner'],[1800,'Mainstage Legend']];
 let progress=Object.assign({xp:0,done:{}},store.get('progress',{}));
-const show=Object.assign({pattern:'hearts',palette:'candy',text:'',speed:1,bassReact:true,beatStrobe:false,laserColor:'#ff4fb0',laserMode:'fan',laserAuto:true,flameAuto:true,reduceFlash:prefersReduced,paintPattern:false,paintText:false,sky:'auto',sail:'auto'},store.get('show',{}));
+const show=Object.assign({pattern:'hearts',palette:'candy',text:'',speed:1,bassReact:true,beatStrobe:false,laserColor:'#ff4fb0',laserMode:'fan',laserAuto:true,flameAuto:true,reduceFlash:prefersReduced,paintPattern:false,paintText:false,sky:'auto',sail:'auto',comfort:prefersReduced},store.get('show',{}));
 const saveShow=()=>store.set('show',show);
 
 /* ================= TOASTS ================= */
@@ -792,6 +792,9 @@ function buildShigost(){
     sg.dance=sg.mixer.clipAction(clip('dance'));
     sg.jump=sg.mixer.clipAction(clip('jump')); sg.jump.setLoop(THREE.LoopOnce,1); sg.jump.clampWhenFinished=true;
     sg.act=null; sg.fading=null; sg.actT=0; sg.w=0; sg.snap=[];
+    // POV camera: head bone rotation -> "looking straight out of her face" (body's +z forward, +y up)
+    sg.head=head; sg.hp=hp; wrap.updateMatrixWorld(true);
+    sg.headOff=head.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(wrap.getWorldQuaternion(new THREE.Quaternion()));
     sg.ready=true;
   },err=>{ console.error(err); toast("Shigost's model could not load",'warn'); })).catch(err=>{ console.error(err); toast("Shigost's model could not load. Open the site through a local server, not by double-clicking the file.",'warn'); });
 }
@@ -1693,14 +1696,67 @@ function init3D(){
 /* camera */
 const cam={tx:0,ty:1.2,tz:-3,r:70,theta:0.6,phi:1.0,fov:30};
 const camT=Object.assign({},cam);
-const PRESETS={diorama:{tx:0,ty:1.2,tz:-3,r:70,theta:0.6,phi:1.0,fov:30},front:{tx:0,ty:3.3,tz:-3.6,r:12,theta:0.2,phi:1.46,fov:46},dj:{tx:0,ty:1.6,tz:6,r:11.5,theta:Math.PI,phi:1.27,fov:52}};
+const PRESETS={diorama:{tx:0,ty:1.2,tz:-3,r:70,theta:0.6,phi:1.0,fov:30},front:{tx:0,ty:3.3,tz:-3.6,r:12,theta:0.2,phi:1.46,fov:46},dj:{tx:-1.4,ty:1.2,tz:4.0,r:11.19,theta:3.112,phi:1.147,fov:52}};
 const view={w:1,h:1,c:0,s:0,cT:0,sT:0};
 function updateViewTargets(){
   if(isMobile()){ view.cT=0; view.sT=$('#console').offsetHeight*0.92; }
   else { view.cT=400; view.sT=0; }
   document.documentElement.style.setProperty('--sheetH',(isMobile()?$('#console').offsetHeight:0)+'px');
 }
+// first-person POV from Shigost's eyes ("Shigost's view"); PRESETS.dj is the fallback if her model fails to load
+const pov={on:false,yaw:0,pitch:0,fov:55,fovT:55,idle:0,enter:0,had:false,selfHide:0,pos:new THREE.Vector3(),q:new THREE.Quaternion(),anchor:new THREE.Vector3()};
+const POV_YAW=100*Math.PI/180, POV_UP=40*Math.PI/180, POV_DOWN=-60*Math.PI/180;
+const _pe=new THREE.Vector3(),_pf=new THREE.Vector3(),_pw=new THREE.Vector3(),_pq=new THREE.Quaternion(),_pl=new THREE.Quaternion(),_pEu=new THREE.Euler(0,0,0,'YXZ');
+const _pUp=new THREE.Vector3(0,1,0), _pFlip=new THREE.Quaternion().setFromAxisAngle(_pUp,Math.PI);
+function povActive(){ return pov.on&&sg.ready; }
+function applyLens(fov,near){
+  const fw=view.w+view.c, fh=view.h+view.s;
+  camera.fov=fov*(view.w/view.h<1?1.25:1); camera.near=near; camera.aspect=fw/fh;
+  camera.setViewOffset(fw,fh,view.c,view.s,view.w,view.h); camera.updateProjectionMatrix();
+}
+// leaving POV: rebuild the orbit from wherever the POV camera is looking, so the tween starts there
+function orbitFromCamera(){
+  const d=10; camera.getWorldDirection(_pf);
+  cam.tx=camera.position.x+_pf.x*d; cam.ty=camera.position.y+_pf.y*d; cam.tz=camera.position.z+_pf.z*d;
+  cam.r=d; cam.phi=Math.acos(clamp(-_pf.y,-1,1)); cam.theta=Math.atan2(-_pf.x,-_pf.z); cam.fov=pov.fov;
+}
+function updatePOV(dt){
+  sg.root.updateMatrixWorld(true);
+  _pe.set(0,0,0); sg.glows.forEach(g=>_pe.add(g.getWorldPosition(_pw))); _pe.multiplyScalar(1/sg.glows.length);
+  sg.head.getWorldQuaternion(_pq).multiply(sg.headOff);
+  _pf.set(0,0,1).applyQuaternion(_pq);
+  _pe.addScaledVector(_pf,0.2);
+  _pq.multiply(_pFlip); // cameras look down -z
+  // the jump's crouch dips her face below the deck top; keep the eyes out of the booth
+  const eyeY=_pe.y;
+  if(Math.abs(_pe.x)<1.6&&_pe.z>-3.75&&_pe.z<-2.4) _pe.y=Math.max(_pe.y,2.65+LIFT);
+  // her own nods only tip the view +-20 degrees, so a crouch doesn't fill the screen with the mixer
+  // comfort mode keeps 30% of the bob and roll
+  _pEu.setFromQuaternion(_pq,'YXZ'); const nod=Math.abs(_pEu.x)>0.35;
+  _pEu.x=clamp(_pEu.x,-0.35,0.35); if(show.comfort) _pEu.z*=0.3; _pq.setFromEuler(_pEu);
+  // while either limit kicks in the lens no longer matches her face, so her hood would fill it; hide her for that moment
+  pov.selfHide=(nod||_pe.y-eyeY>0.02)?0.2:Math.max(0,pov.selfHide-dt);
+  sg.gltfRoot.visible=pov.selfHide<=0;
+  const poofed=pov.had&&pov.enter>=1&&_pe.distanceTo(pov.pos)>1.5;
+  if(!pov.had||poofed) pov.anchor.copy(_pe); else pov.anchor.lerp(_pe,1-Math.exp(-dt*2.5));
+  if(show.comfort) _pe.sub(pov.anchor).multiplyScalar(0.3).add(pov.anchor);
+  // look-around offset, easing back to straight ahead after a few idle seconds
+  pov.idle+=dt;
+  if(pov.idle>3){ const d=Math.exp(-dt*1.8); pov.yaw*=d; pov.pitch*=d; }
+  _pq.multiply(_pl.setFromEuler(_pEu.set(pov.pitch,pov.yaw,0)));
+  if(!pov.had){ pov.pos.copy(camera.position); pov.q.copy(camera.quaternion); pov.fov=cam.fov; pov.had=true; }
+  pov.enter=Math.min(1,pov.enter+dt*1.2);
+  const k=1-Math.exp(-dt*lerp(2.5,14,pov.enter*pov.enter));
+  if(poofed) pov.pos.copy(_pe); else pov.pos.lerp(_pe,k);
+  pov.q.slerp(_pq,k);
+  pov.fov+=(pov.fovT-pov.fov)*(1-Math.exp(-dt*8));
+  camera.position.copy(pov.pos); camera.quaternion.copy(pov.q);
+  applyLens(pov.fov,0.05);
+}
 function setPreset(name){
+  if(povActive()&&name!=='dj') orbitFromCamera();
+  pov.on=name==='dj';
+  if(pov.on){ pov.yaw=pov.pitch=0; pov.idle=0; pov.enter=0; pov.had=false; pov.fovT=55; }
   const tw=Math.PI*2; cam.theta=((cam.theta+Math.PI)%tw+tw)%tw-Math.PI; camT.theta=cam.theta;
   Object.assign(camT,PRESETS[name]);
   $$('.cams button').forEach(b=>b.classList.toggle('on',b.dataset.cam===name));
@@ -1720,6 +1776,11 @@ function setupPointer(canvas){
     if(!p){ const now=performance.now(); if(now-hoverT>90&&e.pointerType==='mouse'){ hoverT=now; canvas.style.cursor=pick(e.clientX,e.clientY)?'pointer':'grab'; } return; }
     const dx=e.clientX-p.x, dy=e.clientY-p.y; p.x=e.clientX; p.y=e.clientY;
     if(down) down.moved+=Math.abs(dx)+Math.abs(dy);
+    if(povActive()){
+      if(pts.size===1&&(!down||down.moved>6)){ pov.yaw=clamp(pov.yaw+dx*0.005,-POV_YAW,POV_YAW); pov.pitch=clamp(pov.pitch+dy*0.005,POV_DOWN,POV_UP); pov.idle=0; }
+      else if(pts.size===2){ const a=[...pts.values()]; const d=Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y); if(pinch>0) pov.fovT=clamp(pov.fovT*pinch/d,35,70); pinch=d; pov.idle=0; }
+      return;
+    }
     if(pts.size===1&&(!down||down.moved>6)){ camT.theta-=dx*0.006; camT.phi=clamp(camT.phi-dy*0.005,0.3,1.55); $$('.cams button').forEach(b=>b.classList.remove('on')); }
     else if(pts.size===2){ const a=[...pts.values()]; const d=Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y); if(pinch>0) camT.r=clamp(camT.r*pinch/d,7,70); pinch=d; }
   });
@@ -1729,7 +1790,7 @@ function setupPointer(canvas){
   };
   canvas.addEventListener('pointerup',up);
   canvas.addEventListener('pointercancel',e=>{ pts.delete(e.pointerId); down=null; });
-  canvas.addEventListener('wheel',e=>{ e.preventDefault(); camT.r=clamp(camT.r*(1+e.deltaY*0.001),7,70); },{passive:false});
+  canvas.addEventListener('wheel',e=>{ e.preventDefault(); if(povActive()){ pov.fovT=clamp(pov.fovT*(1+e.deltaY*0.001),35,70); return; } camT.r=clamp(camT.r*(1+e.deltaY*0.001),7,70); },{passive:false});
 }
 
 /* jelly squish */
@@ -1742,12 +1803,13 @@ function update3D(dt,T){
   const k=1-Math.exp(-dt*3.2);
   for(const key in cam) cam[key]+=(camT[key]-cam[key])*k;
   view.c+=(view.cT-view.c)*k; view.s+=(view.sT-view.s)*k;
-  const e=vibe/100;
-  camera.position.set(cam.tx+cam.r*Math.sin(cam.phi)*Math.sin(cam.theta),cam.ty+cam.r*Math.cos(cam.phi),cam.tz+cam.r*Math.sin(cam.phi)*Math.cos(cam.theta));
-  camera.lookAt(cam.tx,cam.ty,cam.tz);
-  const fw=view.w+view.c, fh=view.h+view.s;
-  camera.fov=cam.fov*(view.w/view.h<1?1.25:1); camera.aspect=fw/fh;
-  camera.setViewOffset(fw,fh,view.c,view.s,view.w,view.h); camera.updateProjectionMatrix();
+  const e=vibe/100, inPOV=povActive();
+  if(!inPOV){
+    camera.position.set(cam.tx+cam.r*Math.sin(cam.phi)*Math.sin(cam.theta),cam.ty+cam.r*Math.cos(cam.phi),cam.tz+cam.r*Math.sin(cam.phi)*Math.cos(cam.theta));
+    camera.lookAt(cam.tx,cam.ty,cam.tz);
+    applyLens(cam.fov,0.1);
+  }
+  if(sg.ready){ sg.hp.visible=!inPOV; sg.glows.forEach(g=>g.visible=!inPOV); if(!inPOV) sg.gltfRoot.visible=true; }
 
   // day to night
   const nT=show.sky==='day'?0:show.sky==='night'?1:(anyPlaying()?1:0);
@@ -1787,6 +1849,7 @@ function update3D(dt,T){
   // Shigost
   const playing=anyPlaying();
   updateShigost(dt,T,e,playing);
+  if(inPOV) updatePOV(dt);
   updatePoof(dt);
 
   // scenery bounce
@@ -2093,7 +2156,7 @@ function buildShow(){
   $('#projText').addEventListener('input',e=>{ show.text=e.target.value; if(show.text.trim()) show.paintText=true; saveShow(); checkPaint(); });
   $('#projSpeed').value=show.speed; $('#projSpeed').addEventListener('input',e=>{ show.speed=+e.target.value; saveShow(); });
   const tog=(id,key)=>{ const i=$(id); i.checked=!!show[key]; i.addEventListener('change',()=>{ show[key]=i.checked; saveShow(); }); };
-  tog('#tLaserAuto','laserAuto'); tog('#tFlameAuto','flameAuto'); tog('#tBass','bassReact'); tog('#tBeatStrobe','beatStrobe'); tog('#tReduce','reduceFlash');
+  tog('#tLaserAuto','laserAuto'); tog('#tFlameAuto','flameAuto'); tog('#tBass','bassReact'); tog('#tBeatStrobe','beatStrobe'); tog('#tReduce','reduceFlash'); tog('#tComfort','comfort');
   const sb=$('#sStrobe');
   sb.addEventListener('pointerdown',()=>{strobeHold=true;});
   ['pointerup','pointerleave','pointercancel'].forEach(ev=>sb.addEventListener(ev,()=>{strobeHold=false;}));
