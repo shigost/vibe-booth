@@ -954,6 +954,33 @@ function mergeGeos(parts){
   const cat=a=>{ const o=new Float32Array(a.reduce((s,x)=>s+x.length,0)); let k=0; a.forEach(x=>{o.set(x,k);k+=x.length;}); return o; };
   const out=new THREE.BufferGeometry(); out.setAttribute('position',new THREE.BufferAttribute(cat(pos),3)); out.setAttribute('normal',new THREE.BufferAttribute(cat(nor),3)); return out;
 }
+// soft body material for the crowd: warm off-white, matte with a faint fabric sheen, a knit-like bump from object-space
+// position (the merged geometry has no UVs), baked AO in the vertex colours, and a soft brightness cap so night washes,
+// strobes, and bass-driven lights can tint the characters but never make them glow
+function softBodyMat(env){
+  const m=new THREE.MeshPhysicalMaterial({color:C('#efe6d9'),vertexColors:true,roughness:0.8,metalness:0,clearcoat:0.06,clearcoatRoughness:0.7,envMap:env,envMapIntensity:0.35});
+  m.sheen=new THREE.Color(0.2,0.18,0.16);
+  m.onBeforeCompile=sh=>{
+    sh.vertexShader='varying vec3 vFab;\n'+sh.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\n vFab=position;');
+    sh.fragmentShader='varying vec3 vFab;\nfloat fabH(vec3 p){ float k=150.; return 0.5*sin(p.y*k)+0.5*sin((p.x+p.z)*k*0.71+sin(p.y*k*0.5)*1.3); }\n'+sh.fragmentShader
+      // knit bump via screen-space derivatives (like three's bump map), faded out where the pattern is finer than a pixel
+      .replace('#include <normal_fragment_maps>','#include <normal_fragment_maps>\n { float h=fabH(vFab), aa=clamp(1.-length(fwidth(vFab))*60.,0.,1.); vec3 sx=dFdx(-vViewPosition), sy=dFdy(-vViewPosition); vec3 r1=cross(sy,normal), r2=cross(normal,sx); float det=dot(sx,r1); vec3 g=sign(det)*(dFdx(h)*r1+dFdy(h)*r2); normal=normalize(abs(det)*normal-g*0.0012*aa); }')
+      // soft knee: light above 0.72x the surface colour rolls off toward 1.3x it, so coloured washes tint but never bloom
+      .replace('#include <output_fragment>','{ vec3 A=diffuseColor.rgb*1.3, K=A*0.72; outgoingLight=mix(outgoingLight,K+(A-K)*(1.-exp(-(outgoingLight-K)/max(A-K,vec3(1e-3)))),step(K,outgoingLight)); }\n#include <output_fragment>');
+  };
+  return m;
+}
+// bakes soft ambient occlusion into vertex colours: darker near the ground, where limbs meet the body, and under the arms.
+// limbs are spheres [x,y,z,r]; body(x,y) returns the nearest body sphere for a vertex at that height; hgt is the body's height
+function bakeBodyAO(geo,limbs,body,hgt){
+  const P=geo.attributes.position, N=geo.attributes.normal, col=new Float32Array(P.count*3), v=new THREE.Vector3(), n=new THREE.Vector3(), d=new THREE.Vector3();
+  const occ=(cx,cy,cz,r)=>{ d.set(cx-v.x,cy-v.y,cz-v.z); const l=d.length(); if(l<r*1.02) return 0; return Math.max(0,n.dot(d.divideScalar(l)))*(r*r)/(l*l); };
+  for(let i=0;i<P.count;i++){ v.fromBufferAttribute(P,i); n.fromBufferAttribute(N,i);
+    let o=0; limbs.forEach(([x,y,z,r])=>{ o+=occ(x,y,z,r*1.6); }); const b=body(v.x,v.y); o+=occ(b[0],b[1],b[2],b[3])*0.8;
+    const ground=1-0.42*(1-sstep(0,0.32*hgt,v.y))*(0.55-0.45*n.y), grad=0.9+0.1*sstep(0.1,0.7*hgt,v.y);
+    const a=clamp((1-Math.min(0.5,o*1.3))*ground*grad,0.5,1); col[i*3]=a; col[i*3+1]=a*0.985; col[i*3+2]=a*0.97; }
+  geo.setAttribute('color',new THREE.BufferAttribute(col,3));
+}
 function makeEnv(){
   const pm=new THREE.PMREMGenerator(renderer), es=new THREE.Scene();
   const g=new THREE.SphereGeometry(10,32,16), cols=new Float32Array(g.attributes.position.count*3), top=new THREE.Color('#ffffff'), mid=new THREE.Color('#ece3f7'), bot=new THREE.Color('#b9aed0'), c=new THREE.Color();
@@ -1625,9 +1652,9 @@ function init3D(){
     const beams=[-1,0,1].map(o=>{ const bg=new THREE.Group(); bg.add(new THREE.Mesh(coreG,coreM)); bg.add(new THREE.Mesh(haloG,haloM)); bg.userData.o=o; em.add(bg); return bg; });
     laserRoot.add(em); lasers.push({em,beams,coreM,haloM,base:x});
   });
-  // crowd of original Recklyss Studios characters, glossy porcelain like the concept art
+  // crowd of original Recklyss Studios characters: soft, warm, fabric-like bodies to match Shigost (glossy eyes stay glossy)
   const env=makeEnv(); crowd.env=env;
-  const whiteM=new THREE.MeshPhysicalMaterial({color:C('#f7f6f3'),roughness:0.16,metalness:0,clearcoat:1,clearcoatRoughness:0.06,envMap:env,envMapIntensity:1});
+  const whiteM=softBodyMat(env);
   const blackM=new THREE.MeshPhysicalMaterial({color:C('#0b0b0d'),roughness:0.05,metalness:0,clearcoat:1,clearcoatRoughness:0.03,envMap:env,envMapIntensity:1.3});
   crowd.mats=[whiteM,blackM];
   const M=(x,y,z,sx,sy,sz,rx,ry,rz)=>new THREE.Matrix4().compose(new THREE.Vector3(x,y,z),new THREE.Quaternion().setFromEuler(new THREE.Euler(rx||0,ry||0,rz||0)),new THREE.Vector3(sx,sy,sz));
@@ -1635,10 +1662,12 @@ function init3D(){
   // tall bean character: stubby arms and legs, glossy eyes
   const bp=[[0.001,0.15],[0.21,0.16],[0.28,0.22],[0.305,0.36],[0.3,0.6],[0.285,0.8],[0.245,0.94],[0.15,1.02],[0.001,1.045]].map(p=>new THREE.Vector2(p[0],p[1]));
   const gWhite=mergeGeos([[new THREE.LatheGeometry(bp,32),M(0,0,0,1,1,0.86)],[sph,M(0.11,0.1,0.03,0.11,0.12,0.13)],[sph,M(-0.11,0.1,0.03,0.11,0.12,0.13)],[sph,M(0.31,0.45,0,0.07,0.17,0.08,0,0,0.1)],[sph,M(-0.31,0.45,0,0.07,0.17,0.08,0,0,-0.1)]]);
+  bakeBodyAO(gWhite,[[0.31,0.45,0,0.12],[-0.31,0.45,0,0.12],[0.11,0.1,0.03,0.12],[-0.11,0.1,0.03,0.12]],(x,y)=>[0,Math.min(Math.max(y,0.2),0.95),0,0.27],1.05);
   const gBlack=mergeGeos([[sph,M(0.115,0.72,0.225,0.08,0.09,0.04,0,0.45,0)],[sph,M(-0.115,0.72,0.225,0.08,0.09,0.04,0,-0.45,0)]]);
   // Kiki: glossy egg, giant bezel eyes, little round feet with dark soles
   const bezel=new THREE.TorusGeometry(1,0.17,10,32), disc=new THREE.CylinderGeometry(1,1,1,24);
   const kWhite=mergeGeos([[sph,M(0,0.56,0,0.4,0.46,0.38)],[sph,M(0.15,0.09,0.03,0.12,0.075,0.135)],[sph,M(-0.15,0.09,0.03,0.12,0.075,0.135)]]);
+  bakeBodyAO(kWhite,[[0.15,0.09,0.03,0.12],[-0.15,0.09,0.03,0.12]],()=>[0,0.56,0,0.36],1.02);
   const kBlack=mergeGeos([[sph,M(0.165,0.7,0.3,0.135,0.135,0.075,0,0.45,0)],[sph,M(-0.165,0.7,0.3,0.135,0.135,0.075,0,-0.45,0)],
     [bezel,M(0.17,0.7,0.297,0.145,0.145,0.12,0,0.45,0)],[bezel,M(-0.17,0.7,0.297,0.145,0.145,0.12,0,-0.45,0)],
     [disc,M(0.15,0.012,0.03,0.125,0.024,0.14)],[disc,M(-0.15,0.012,0.03,0.125,0.024,0.14)]]);
@@ -1657,6 +1686,11 @@ function init3D(){
   crowd.meshes={g:[new THREE.InstancedMesh(gWhite,whiteM,crowd.n.g),new THREE.InstancedMesh(gBlack,blackM,crowd.n.g)],k:[new THREE.InstancedMesh(kWhite,whiteM,crowd.n.k),new THREE.InstancedMesh(kBlack,blackM,crowd.n.k)]};
   const cheer=()=>{ crowdCheer=1; addVibe(2); toast('The crowd cheers for you 🙌'); };
   ['g','k'].forEach(t=>crowd.meshes[t].forEach((m,i)=>{ if(i===0){m.castShadow=true;} m.frustumCulled=false; m.userData.tap=cheer; inner.add(m); }));
+  // soft contact shadows on the dance floor, one per character, shrinking and fading as they hop
+  const ctex=canvasTex(64,64,(c,w,h)=>{ const g=c.createRadialGradient(32,32,2,32,32,32); g.addColorStop(0,'rgba(0,0,0,1)'); g.addColorStop(0.45,'rgba(0,0,0,.6)'); g.addColorStop(1,'rgba(0,0,0,0)'); c.fillStyle=g; c.fillRect(0,0,w,h); });
+  const cg=new THREE.PlaneGeometry(1,1); cg.rotateX(-Math.PI/2);
+  crowd.contact=new THREE.InstancedMesh(cg,new THREE.MeshBasicMaterial({map:ctex,color:C('#2a1f2a'),transparent:true,opacity:0.42,depthWrite:false}),crowd.people.length);
+  crowd.contact.frustumCulled=false; crowd.contact.renderOrder=2; inner.add(crowd.contact);
   crowd.sn=Math.min(16,crowd.people.length); crowd.spos=new Float32Array(crowd.sn*3); const scol=new Float32Array(crowd.sn*3);
   const sc=[[1,0.45,0.8],[0.45,0.9,1],[0.75,0.55,1],[1,0.9,0.45]];
   for(let i=0;i<crowd.sn;i++) scol.set(sc[i%4],i*3);
@@ -2001,7 +2035,7 @@ function update3D(dt,T){
   crowdCheer=Math.max(0,crowdCheer-dt*0.9);
   const d=crowd.dummy, hop=beatPulse*beatPulse, TW=Math.PI*2;
   const wrapA=a=>((a+Math.PI)%TW+TW)%TW-Math.PI;
-  crowd.mats[0].envMapIntensity=lerp(1,0.3,night); crowd.mats[1].envMapIntensity=lerp(1.3,0.5,night);
+  crowd.mats[0].envMapIntensity=lerp(0.35,0.12,night); crowd.mats[1].envMapIntensity=lerp(1.3,0.5,night);
   crowd.people.forEach((p,i)=>{
     const camYaw=Math.atan2(camera.position.x-p.x,camera.position.z-p.z);
     if(playing&&p.peek<=0&&Math.random()<dt*0.035) p.peek=1.2+Math.random()*2;
@@ -2014,9 +2048,10 @@ function update3D(dt,T){
     d.position.set(p.x,air,p.z); d.rotation.set(0,p.yaw,Math.sin(T*2+p.ph)*0.08*e);
     d.scale.set(p.s*(1+sq*0.5),p.s*(1-sq),p.s*(1+sq*0.5)); d.updateMatrix();
     crowd.meshes[p.type][0].setMatrixAt(p.idx,d.matrix); crowd.meshes[p.type][1].setMatrixAt(p.idx,d.matrix);
+    { const cs=p.s*(p.type==='g'?0.78:0.82)/(1+air*1.6); d.position.set(p.x,0.085,p.z); d.rotation.set(0,0,0); d.scale.set(cs,1,cs); d.updateMatrix(); crowd.contact.setMatrixAt(i,d.matrix); }
     if(i<crowd.sn){ crowd.spos[i*3]=p.x+0.32*p.s*Math.cos(p.yaw)+Math.sin(T*3+p.ph)*0.2*(0.2+e); crowd.spos[i*3+1]=air+p.s*1.15+e*0.3; crowd.spos[i*3+2]=p.z-0.32*p.s*Math.sin(p.yaw); }
   });
-  ['g','k'].forEach(t=>crowd.meshes[t].forEach(m=>m.instanceMatrix.needsUpdate=true));
+  ['g','k'].forEach(t=>crowd.meshes[t].forEach(m=>m.instanceMatrix.needsUpdate=true)); crowd.contact.instanceMatrix.needsUpdate=true;
   crowd.sticks.geometry.attributes.position.needsUpdate=true;
   crowd.sticks.material.opacity=night*(0.3+0.7*e);
 
