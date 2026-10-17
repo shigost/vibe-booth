@@ -1034,7 +1034,37 @@ function terrainH(x,z){
   return -3.95-0.22*sstep(SHELF.drop,SHELF.drop+2.6,d)+0.08*n-26*sstep(SHELF.drop+5,SHELF.drop+110,d);
 }
 // the ridges push the volcano's foot out to about 1.11 x VOLC.r, so look it up a little past the profile radius
-function surfRaw(x,z){ const dv=Math.hypot(x-VOLC.x,z-VOLC.z); return dv<VOLC.r*1.15?Math.max(volcSurf(x,z),terrainH(x,z)):terrainH(x,z); }
+// little rocky islets out in the lagoon, between the turtle's lap and the reef (a: angle round the island, R: rock radius, h: height)
+let ISLETS=null;
+function islets(){ return ISLETS||(ISLETS=[{a:0.15,R:1.05,h:1.35,s:1.7},{a:2.95,R:0.85,h:1.0,s:4.3},{a:5.6,R:0.95,h:1.2,s:2.2}].map(o=>{ const d=islandR(o.a)+5.6;
+  return Object.assign(o,{x:Math.cos(o.a)*d,z:OCZ+Math.sin(o.a)*d,cove:o.a}); })); }
+function isletLocal(o,dx,dz){ const d=Math.hypot(dx,dz), th=Math.atan2(dz,dx), Rt=o.R*(1+0.18*Math.sin(3*th+o.s)+0.1*Math.sin(5*th+2*o.s)),
+    cv=Math.max(0,Math.cos(th-o.cove)), Rc=Rt*(1+0.55*Math.pow(cv,4)), t=d/Rt;
+  const rock=t<1?o.h*Math.pow(1-t*t,0.8)*(0.85+0.15*Math.sin(7*th+o.s)+0.08*Math.sin(11*th)):0, sand=d<Rc?0.14*(1-d/Rc):-1;
+  return {y:Math.max(rock,sand),Rc}; }
+// height of the islets above the sea at (x,z), or -Infinity off them
+function isletH(x,z){ let best=-Infinity; for(const o of islets()){ const dx=x-o.x, dz=z-o.z; if(dx*dx+dz*dz>o.R*o.R*2.6) continue; const l=isletLocal(o,dx,dz); if(Math.hypot(dx,dz)<=l.Rc) best=Math.max(best,-0.31+l.y); } return best; }
+function surfRaw(x,z){ const dv=Math.hypot(x-VOLC.x,z-VOLC.z); const g=dv<VOLC.r*1.15?Math.max(volcSurf(x,z),terrainH(x,z)):terrainH(x,z); return Math.max(g,isletH(x,z)); }
+function buildIslet(o){
+  const NS=28, F=[0.13,0.27,0.41,0.54,0.66,0.76,0.85,0.92,0.97,1], pos=[], idx=[];
+  const top=-0.31+isletLocal(o,0,0).y; pos.push(o.x,top,o.z);
+  F.forEach(f=>{ for(let i=0;i<NS;i++){ const th=i/NS*6.283, Rc=isletLocal(o,Math.cos(th)*1e-3,Math.sin(th)*1e-3).Rc, r=Rc*f*0.999, x=o.x+Math.cos(th)*r, z=o.z+Math.sin(th)*r; pos.push(x,-0.31+isletLocal(o,x-o.x,z-o.z).y,z); } });
+  for(let i=0;i<NS;i++){ const th=i/NS*6.283, Rc=isletLocal(o,Math.cos(th)*1e-3,Math.sin(th)*1e-3).Rc, x=o.x+Math.cos(th)*Rc*1.02, z=o.z+Math.sin(th)*Rc*1.02; pos.push(x,terrainH(x,z)-0.05,z); }
+  pos.push(o.x,terrainH(o.x,o.z)-0.1,o.z);
+  const ring=k=>1+k*NS, nR=F.length+1, bot=1+nR*NS;
+  for(let i=0;i<NS;i++){ const j=(i+1)%NS; idx.push(0,ring(0)+j,ring(0)+i); }
+  for(let k=0;k<nR-1;k++) for(let i=0;i<NS;i++){ const j=(i+1)%NS, a=ring(k)+i, b=ring(k)+j, c=ring(k+1)+i, d=ring(k+1)+j; idx.push(a,b,c, b,d,c); }
+  for(let i=0;i<NS;i++){ const j=(i+1)%NS; idx.push(bot,ring(nR-1)+i,ring(nR-1)+j); }
+  const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3)); g.setIndex(idx);
+  const flat=g.toNonIndexed(); flat.computeVertexNormals();
+  const P=flat.attributes.position, N=flat.attributes.normal, col=new Float32Array(P.count*3), c=new THREE.Color();
+  const sand=C('#ead7a8'), wet=C('#c9b17f'), bas=C('#2e2a30'), bas2=C('#463e44'), moss=C('#5d8a3a'), moss2=C('#7aa84a');
+  for(let f=0;f<P.count;f+=3){ const y=(P.getY(f)+P.getY(f+1)+P.getY(f+2))/3+0.31, ny=N.getY(f);
+    if(y<0.02) c.copy(wet); else if(y<0.17&&ny>0.6) c.copy(sand); else if(ny<0.62) c.copy(hash1(f+o.s)<0.5?bas:bas2); else c.copy(hash1(f*1.3+o.s)<0.5?moss:moss2);
+    for(let k=0;k<3;k++){ col[(f+k)*3]=c.r; col[(f+k)*3+1]=c.g; col[(f+k)*3+2]=c.b; } }
+  flat.setAttribute('color',new THREE.BufferAttribute(col,3)); flat.userData.indexed=g;
+  const m=new THREE.Mesh(flat,applyUnderwater(new THREE.MeshStandardMaterial({vertexColors:true,flatShading:true,roughness:0.95})));
+  m.castShadow=m.receiveShadow=true; m.userData.tap=groundTap; m.userData.islet=true; inner.add(m); return m; }
 function clampRB(x,z){ const hx=SLAB.w/2-0.02, hz=SLAB.d/2-0.02, r=SLAB.r; let ax=Math.min(Math.abs(x),hx), az=Math.min(Math.abs(z-OCZ),hz); const qx=ax-(hx-r), qz=az-(hz-r);
   if(qx>0&&qz>0){ const l=Math.hypot(qx,qz); if(l>r){ ax=hx-r+qx/l*r; az=hz-r+qz/l*r; } } return [Math.sign(x)*ax, OCZ+Math.sign(z-OCZ)*az]; }
 const TCOL={grass:'#79c95f',sand:'#f1dfb4',wet:'#d8bf8c',reef:'#e6d3a6',rock:'#56485a',bed:'#d8c79c'};
@@ -1083,7 +1113,7 @@ function waveHjs(x,z,t){
   let h=0.06*Math.sin(x*0.55+z*0.25+t*1.3)+0.04*Math.sin((-x*0.3+z*0.7)*1.6+t*1.9)+0.025*Math.sin((x*0.8-z*0.5)*2.7+t*2.6)+0.015*Math.sin((-x*0.6-z*0.6)*4.1+t*3.3);
   const depth=-0.31-terrainH(x,z); return h*(0.2+0.8*sstep(0.05,2.0,depth));
 }
-function randOcean(d0,d1,tries){ for(let k=0;k<(tries||400);k++){ const x=(Math.random()-0.5)*(SLAB.w-1.2), z=OCZ+(Math.random()-0.5)*(SLAB.d-1.2); const d=shoreD(x,z); if(d>=d0&&d<=d1) return [x,z,d]; } return null; }
+function randOcean(d0,d1,tries){ for(let k=0;k<(tries||400);k++){ const x=(Math.random()-0.5)*(SLAB.w-1.2), z=OCZ+(Math.random()-0.5)*(SLAB.d-1.2); const d=shoreD(x,z); if(d<d0||d>d1) continue; if(islets().some(o=>Math.hypot(x-o.x,z-o.z)<o.R*1.6+0.5)) continue; return [x,z,d]; } return null; }
 function makeWaterSurface(hTex){
   const u={uTime:{value:0},uNight:{value:0},uBass:{value:0},uH:{value:hTex},uSun:{value:new THREE.Vector3(-0.45,0.8,0.42).normalize()},
     uRip:{value:[0,1,2,3].map(()=>new THREE.Vector4(0,0,-99,0))},uRipG:{value:[0,0,0,0]},uUw:{value:0},uUwFog:{value:new THREE.Color()}};
@@ -1514,49 +1544,56 @@ function plantSpot(r,tries,pref,foot){ for(let k=0;k<(tries||300);k++){ const x=
 function beachSpot(){ for(let k=0;k<200;k++){ const x=(Math.random()-0.5)*38, z=OCZ+(Math.random()-0.5)*38, d=shoreD(x,z); if(d>-0.35&&d<0.55&&terrainH(x,z)>-0.25){ if(x>-5.4&&x<5.4&&z>-7.8&&z<5.9) continue; if(Math.hypot(x-VOLC.x,z-VOLC.z)<VOLC.r+0.1) continue; return [x,z]; } } return null; }
 /* ---------- the wider world: sky dome, open ocean below the floating island, hazy islands on the horizon ---------- */
 // The island's own sea runs to the horizon; far islands sit on it at sea level.
-const FAR={seaY:-0.31,
-  zen:[C('#4fa3e6'),C('#120c33')], haze:[C('#d4ecf6'),C('#3a2f70')], sea:[C('#2a8cc6'),C('#121848')], shallow:[C('#5fd6d8'),C('#26507a')]};
+const FAR={seaY:-0.31, zen:[C('#4fa3e6'),C('#120c33')], haze:[C('#d4ecf6'),C('#3a2f70')]};
 // Backdrop islands seen from here (a: angle around the island centre, d: distance, r: radius, h: height). When an island
 // becomes visitable, give its entry a scene of its own and swap it in at the same spot so the view from here stays true.
+// Placed away from the main volcano's line in the Island view, and small enough on screen never to rival it.
 const FAR_ISLES=[
-  {id:'peak',  kind:'volcano',a:4.45,d:160,r:28,h:32,seed:1},
-  {id:'ridge', kind:'hills',  a:3.55,d:175,r:34,h:19,seed:7},
-  {id:'twin',  kind:'hills',  a:1.25,d:125,r:17,h:13,seed:3},
-  {id:'atoll', kind:'atoll',  a:1.95,d:88, r:11,h:1.5,seed:4},
-  {id:'cay',   kind:'cay',    a:0.35,d:76, r:4.5,h:1.1,seed:2},
-  {id:'islet', kind:'rock',   a:5.55,d:100,r:6, h:7.5,seed:5},
+  {id:'spires',a:1.25,d:230,r:30,h:22,seed:1.3,palms:true},
+  {id:'twins', a:2.05,d:300,r:38,h:26,seed:4.1},
+  {id:'crag',  a:4.95,d:260,r:28,h:18,seed:2.7},
+  {id:'knoll', a:0.35,d:190,r:20,h:14,seed:6.2,palms:true},
 ];
 const farWorld={};
 // how far under the waterline the camera is: 0 above, 1 below, blended across the waves so the transition is smooth
 let uwK=0;
 const UW_FOG={day:C('#1f8c9a'),night:C('#10264a')}, _uwc=new THREE.Color();
+const hash1=n=>{ const x=Math.sin(n*127.1)*43758.5453; return x-Math.floor(x); };
+// a closed mesh: apex, rings of jagged jungle slopes, a sand rim, a skirt down below the sea, and a bottom cap.
+// Faces are coloured one by one (sand low down, dark basalt where steep, two jungle greens elsewhere) for a faceted low-poly look.
 function farIsleGeo(o){
-  const NS=48, NR=16, pos=[], col=[], idx=[], c=new THREE.Color(), hz=(t,th)=>{ const n=0.12*Math.sin(th*3+o.seed)+0.07*Math.sin(th*7+o.seed*2.3)+0.04*Math.sin(th*13+o.seed);
-    if(o.kind==='volcano') return o.h*Math.pow(Math.max(0,1-t),1.35)*(1+n)-(t<0.07?o.h*0.08:0);
-    if(o.kind==='hills') return o.h*(0.62*Math.exp(-Math.pow((t-0.18)/0.42,2))+0.38*Math.exp(-Math.pow((t-0.62)/0.3,2))*(0.5+0.5*Math.sin(th*2+o.seed)))*(1+n);
-    if(o.kind==='atoll') return t<0.62?-0.4:o.h*Math.exp(-Math.pow((t-0.8)/0.13,2))*(0.75+n*2);
-    if(o.kind==='rock') return o.h*Math.pow(Math.max(0,1-t),0.6)*(1+n*1.5);
-    return o.h*Math.max(0,1-t*t); };
-  const sand=C('#ecdcae'), green=C('#4f9a45'), dark=C('#2f6e3a'), rock=C('#5d5560'), lagoon=FAR.shallow[0];
-  for(let j=0;j<=NR;j++) for(let i=0;i<=NS;i++){ const t=j/NR*1.3, th=i/NS*Math.PI*2, R=o.r*(1+0.16*Math.sin(th*3+o.seed)+0.09*Math.sin(th*5+o.seed*1.7));
-    let y=t<=1?hz(t,th):0.03; if(t<=1) y=Math.max(y*sstep(1,0.82,t)+(t>0.82?0.25*(1-t)/0.18:0),o.kind==='atoll'&&t<0.62?-0.4:0.05);
-    if(t>1) y=0.03;
-    pos.push(Math.cos(th)*R*t,y,Math.sin(th)*R*t);
-    if(t>1||y<0) c.copy(lagoon); else if(t>0.84||y<0.5) c.copy(sand); else c.copy(dark).lerp(green,0.5+0.5*Math.sin(th*9+j)).lerp(rock,o.kind==='rock'?0.7:sstep(o.h*0.55,o.h*0.9,y));
-    col.push(c.r,c.g,c.b); }
-  for(let j=0;j<NR;j++) for(let i=0;i<NS;i++){ const a=j*(NS+1)+i, b=a+NS+1; idx.push(a,b,a+1,a+1,b,b+1); }
-  const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3)); g.setAttribute('color',new THREE.Float32BufferAttribute(col,3)); g.setIndex(idx); g.computeVertexNormals();
-  // a few palms on the low islands so they read as tropical even from far away
-  if(o.kind==='atoll'||o.kind==='cay'){ const parts=[[g.toNonIndexed(),new THREE.Matrix4()]], trunk=new THREE.CylinderGeometry(0.12,0.2,1,5), crown=new THREE.ConeGeometry(1.4,0.5,7);
-    const tc=vcolGeo(trunk,(x,y,z,cc)=>cc.copy(C('#8a6a48'))), cr=vcolGeo(crown,(x,y,z,cc)=>cc.copy(C('#3f8f3a')));
-    const n=o.kind==='atoll'?9:5; for(let k=0;k<n;k++){ const th=k/n*Math.PI*2+o.seed, rr=o.r*(o.kind==='atoll'?0.8:0.3+0.25*(k%2)), x=Math.cos(th)*rr, z=Math.sin(th)*rr, h=2.6+(k%3)*0.6, l=0.15*Math.sin(k*2.1);
-      parts.push([tc,mat4(x+l*h/2,o.h*0.6+h/2,z,0,0,-l)]); parts.push([cr,mat4(x+l*h,o.h*0.6+h,z,Math.PI,k,0)]); }
-    return mergeC(parts); }
-  return g;
+  const NS=32, T=[0.1,0.22,0.36,0.5,0.63,0.75,0.86,0.95,1,1.05], pos=[], idx=[];
+  const spikes=[0,1,2,3].map(k=>({th:hash1(o.seed+k)*6.283,t:0.15+hash1(o.seed*3+k)*0.45,hh:0.25+hash1(o.seed*7+k)*0.45,w:0.12+hash1(o.seed*5+k)*0.1}));
+  const rad=th=>o.r*(1+0.14*Math.sin(th*3+o.seed)+0.08*Math.sin(th*5+o.seed*1.7));
+  const hgt=(t,th)=>{ if(t>=1) return t>1.02?0.18:0.55; let y=o.h*Math.pow(1-t,1.25)*(0.8+0.28*(1-Math.abs(Math.sin(th*4+o.seed)))+0.12*Math.sin(th*9+o.seed*2));
+    spikes.forEach(p=>{ const dth=Math.atan2(Math.sin(th-p.th),Math.cos(th-p.th)); y+=o.h*p.hh*Math.exp(-(dth*dth)/(p.w*p.w)-((t-p.t)*(t-p.t))/0.02); });
+    return Math.max(0.6,y); };
+  pos.push(0,hgt(0,0)*1.04,0);
+  T.forEach(t=>{ for(let i=0;i<NS;i++){ const th=i/NS*6.283, R=rad(th)*t; pos.push(Math.cos(th)*R,hgt(t,th),Math.sin(th)*R); } });
+  for(let i=0;i<NS;i++){ const th=i/NS*6.283, R=rad(th)*1.05; pos.push(Math.cos(th)*R,-8,Math.sin(th)*R); }
+  pos.push(0,-8,0);
+  const ring=k=>1+k*NS, nR=T.length+1, bot=1+nR*NS;
+  for(let i=0;i<NS;i++){ const j=(i+1)%NS; idx.push(0,ring(0)+j,ring(0)+i); }
+  for(let k=0;k<nR-1;k++) for(let i=0;i<NS;i++){ const j=(i+1)%NS, a=ring(k)+i, b=ring(k)+j, c=ring(k+1)+i, d=ring(k+1)+j; idx.push(a,b,c, b,d,c); }
+  for(let i=0;i<NS;i++){ const j=(i+1)%NS; idx.push(bot,ring(nR-1)+i,ring(nR-1)+j); }
+  const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3)); g.setIndex(idx);
+  const flat=g.toNonIndexed(); flat.computeVertexNormals();
+  const P=flat.attributes.position, N=flat.attributes.normal, col=new Float32Array(P.count*3), c=new THREE.Color();
+  const sand=C('#e3cf9c'), basalt=C('#3a3438'), j1=C('#2f7a3a'), j2=C('#4b9a45'), j3=C('#1f5a30');
+  for(let f=0;f<P.count;f+=3){ const y=(P.getY(f)+P.getY(f+1)+P.getY(f+2))/3, ny=N.getY(f);
+    if(y<0.9&&y>-1) c.copy(sand); else if(y<=-1||ny<0.5) c.copy(basalt).lerp(j3,ny<0.35?0:0.35); else { const r=hash1(f*0.37+o.seed); c.copy(r<0.4?j1:r<0.75?j2:j3); }
+    for(let k=0;k<3;k++){ col[(f+k)*3]=c.r; col[(f+k)*3+1]=c.g; col[(f+k)*3+2]=c.b; } }
+  flat.setAttribute('color',new THREE.BufferAttribute(col,3)); flat.userData.indexed=g; flat.userData.rad=rad;
+  return flat;
 }
+// a handful of tiny palm tufts on the sand rim of the nearer peaks
+function farPalmsGeo(o,rad){ const parts=[], tc=vcolGeo(new THREE.CylinderGeometry(0.25,0.4,1,5),(x,y,z,c)=>c.copy(C('#7a5c40'))), cr=vcolGeo(new THREE.ConeGeometry(2.6,1.1,6),(x,y,z,c)=>c.copy(C('#2f7a35')));
+  for(let k=0;k<7;k++){ const th=hash1(o.seed*11+k)*6.283, R=rad(th)*0.97, x=Math.cos(th)*R, z=Math.sin(th)*R, h=5+hash1(k+o.seed)*2;
+    parts.push([tc,mat4(x,0.55+h/2,z,0,0,0,1,h,1)]); parts.push([cr,mat4(x,0.55+h,z,Math.PI,k,0)]); }
+  return mergeC(parts); }
 function buildFarWorld(){
   const sunDir=sun.position.clone().normalize(), U={uNight:{value:0},uTime:{value:0},uSun:{value:sunDir},
-    uZen:{value:FAR.zen[0].clone()},uHaze:{value:FAR.haze[0].clone()},uSea:{value:FAR.sea[0].clone()},uUw:{value:0},uUwCol:{value:new THREE.Color()}};
+    uZen:{value:FAR.zen[0].clone()},uHaze:{value:FAR.haze[0].clone()},uUw:{value:0},uUwCol:{value:new THREE.Color()}};
   farWorld.u=U;
   // scene fog: only underwater for now (blue-green, close); above water it sits out past everything
   scene.fog=new THREE.Fog(0xffffff,2000,3000);
@@ -1566,17 +1603,17 @@ function buildFarWorld(){
     fragmentShader:'uniform vec3 uZen,uHaze,uSun,uUwCol; uniform float uNight,uUw; varying vec3 vD; void main(){ vec3 d=normalize(vD); float e=max(d.y,0.); vec3 c=mix(uHaze,uZen,pow(e,0.5));'+
       ' c+=vec3(1.,0.93,0.78)*(pow(max(dot(d,uSun),0.),24.)*0.35+pow(max(dot(d,uSun),0.),400.)*0.6)*(1.-uNight); c=mix(c,uUwCol,uUw); gl_FragColor=linearToOutputTexel(vec4(c,1.)); }'}));
   sky.renderOrder=-1000; sky.frustumCulled=false; scene.add(sky); farWorld.sky=sky;
-  // distant islands: simple sun shading, dimmed at night, fading into the haze with distance
-  const im=new THREE.ShaderMaterial({uniforms:U,vertexColors:true,
-    vertexShader:'varying vec3 vC,vN,vW; void main(){ vC=color; vN=normalize(mat3(modelMatrix)*normal); vec4 w=modelMatrix*vec4(position,1.); vW=w.xyz; gl_Position=projectionMatrix*viewMatrix*w; }',
-    fragmentShader:'uniform vec3 uHaze,uSun; uniform float uNight; varying vec3 vC,vN,vW; void main(){ float l=0.55+0.6*max(dot(normalize(vN),uSun),0.);'+
-      ' vec3 c=vC*l*mix(1.,0.32,uNight); float dist=length(vW-cameraPosition); c=mix(c,uHaze,clamp(smoothstep(30.,420.,dist)*0.9,0.,0.9)); gl_FragColor=linearToOutputTexel(vec4(c,1.)); }'});
-  farWorld.isles=FAR_ISLES.map(o=>{ const m=new THREE.Mesh(farIsleGeo(o),im); m.position.set(Math.cos(o.a)*o.d,FAR.seaY,OCZ+Math.sin(o.a)*o.d); m.rotation.y=o.seed; m.userData.isle=o.id; scene.add(m); return m; });
+  // distant islands: opaque, flat-shaded, lit by the sun and moon, hazed by the scene fog like everything else
+  const im=new THREE.MeshStandardMaterial({vertexColors:true,flatShading:true,roughness:1,metalness:0});
+  farWorld.isles=FAR_ISLES.map(o=>{ const geo=farIsleGeo(o), m=new THREE.Mesh(geo,im); m.position.set(Math.cos(o.a)*o.d,FAR.seaY,OCZ+Math.sin(o.a)*o.d); m.rotation.y=o.seed;
+    m.castShadow=m.receiveShadow=false; m.userData.isle=o.id; scene.add(m);
+    if(o.palms){ const pm=new THREE.Mesh(farPalmsGeo(o,geo.userData.rad),im); pm.castShadow=pm.receiveShadow=false; m.add(pm); }
+    return m; });
 }
 function updateFarWorld(T){
   const u=farWorld.u; if(!u) return;
   u.uNight.value=night; u.uTime.value=T;
-  u.uZen.value.copy(FAR.zen[0]).lerp(FAR.zen[1],night); u.uHaze.value.copy(FAR.haze[0]).lerp(FAR.haze[1],night); u.uSea.value.copy(FAR.sea[0]).lerp(FAR.sea[1],night);
+  u.uZen.value.copy(FAR.zen[0]).lerp(FAR.zen[1],night); u.uHaze.value.copy(FAR.haze[0]).lerp(FAR.haze[1],night);
   farWorld.sky.position.copy(camera.position);
   const cp=camera.position, wl=-0.31+waveHjs(cp.x,cp.z,T); uwK=sstep(0.12,-0.12,cp.y-wl);
   _uwc.copy(UW_FOG.day).lerp(UW_FOG.night,night); u.uUw.value=uwK; u.uUwCol.value.copy(_uwc);
@@ -1847,6 +1884,9 @@ function init3D(){
   // a palm's fronds reach 0.42h from its crown, and the lean moves the crown up to 0.18h*|lean| off the trunk base
   for(let k=0;k<11;k++){ const h=7+Math.random()*4, lean=(Math.random()-0.5)*1.2, p=plantSpot(h*(0.42+0.18*Math.abs(lean)),400,(x,z)=>back(x,z)||Math.abs(x)>6.5,0.9); if(p) sways.push(palm(p[0],p[1],h,lean)); }
   const pagos=[]; for(let k=0;k<6;k++){ const s=0.9+Math.random()*0.3, p=plantSpot(1.8*s,400,null,1.6); if(p) pagos.push(pago(p[0],p[1],s)); }
+  isl.isletMeshes=islets().map(o=>{ const m=buildIslet(o);
+    const n=o.R>1?2:1; for(let k=0;k<n;k++){ const a=o.s*2+k*2.4, r=o.R*0.35, px=o.x+Math.cos(a)*r, pz=o.z+Math.sin(a)*r, p=palm(px,pz,2.6+hash1(o.s+k)*0.9,(hash1(o.s*2+k)-0.5)*0.8);
+      p.position.y=isletH(px,pz)-0.02; sways.push(p); } return m; });
   isl.sways=sways;
   // instanced understory
   const dmp=new THREE.Object3D();
