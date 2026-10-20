@@ -9,7 +9,8 @@ const store={
   set(k,v){try{localStorage.setItem('vibebooth_'+k,JSON.stringify(v));}catch(e){}}
 };
 const prefersReduced=!!(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches);
-const isMobile=()=>window.matchMedia('(max-width: 820px)').matches;
+// the bottom-sheet layout (portrait phones, folded phones); phones on their side use a side panel instead
+const isMobile=()=>window.matchMedia('(max-width:820px) and (orientation:portrait), (max-width:820px) and (min-height:501px)').matches;
 // phones render the 3D at 1.5x at most: far fewer pixels than 2-3x, and the GPU/main thread leave room for audio
 const pixelRatio=()=>Math.min(window.devicePixelRatio||1,(isMobile()||window.matchMedia('(pointer: coarse)').matches)?1.5:2);
 
@@ -2001,7 +2002,7 @@ const PRESETS={island:{tx:0,ty:1.2,tz:-3,r:62,theta:0.6,phi:1.0,fov:30},front:{t
 const view={w:1,h:1,c:0,s:0,cT:0,sT:0};
 function updateViewTargets(){
   if(isMobile()){ view.cT=0; view.sT=$('#console').offsetHeight*0.92; }
-  else { view.cT=400; view.sT=0; }
+  else { view.cT=Math.max(0,window.innerWidth-$('#console').getBoundingClientRect().left); view.sT=0; }
   document.documentElement.style.setProperty('--sheetH',(isMobile()?$('#console').offsetHeight:0)+'px');
 }
 // first-person POV from Shigost's eyes ("Shigost's view"); PRESETS.dj is the fallback if her model fails to load
@@ -2723,6 +2724,15 @@ function bindGlobal(){
   $('#handle').addEventListener('click',()=>setSheet(!$('#console').classList.contains('open')));
   $$('.cams button').forEach(b=>b.addEventListener('click',()=>setPreset(b.dataset.cam)));
   let camIdx=0; const camOrder=['island','front','dj','reef'], camNames={island:'Island view',front:'Front row',dj:"Shigost's view",reef:'Reef view'};
+  // help sheet: copies the How to play text, offers the camera views, and closes on Got it, Escape, a view, or a tap outside
+  { const sheet=$('#helpSheet'); let back=null;
+    $('#helpText').innerHTML=[...$$('.howto p')].filter(p=>!p.classList.contains('howTitle')).map(p=>p.outerHTML).join('');
+    const close=()=>{ sheet.hidden=true; if(back&&back.focus) back.focus(); };
+    $('#helpBtn').addEventListener('click',()=>{ back=document.activeElement; sheet.hidden=false; $('#helpClose').focus(); });
+    $('#helpClose').addEventListener('click',close);
+    sheet.addEventListener('click',e=>{ if(e.target===sheet) close(); });
+    document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&!sheet.hidden) close(); });
+    $$('.helpCams button').forEach(b=>b.addEventListener('click',close)); }
   $('#camCycle').addEventListener('click',()=>{ camIdx=(camIdx+1)%camOrder.length; setPreset(camOrder[camIdx]); toast(camNames[camOrder[camIdx]]); });
   $('#pA').addEventListener('click',()=>{ if(audioReady) togglePlay(decks.A); });
   $('#pB').addEventListener('click',()=>{ if(audioReady) togglePlay(decks.B); });

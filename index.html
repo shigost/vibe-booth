@@ -35,6 +35,7 @@
 
 <div class="stats">
   <button class="glass camBtn" id="camCycle" aria-label="Change camera view">🎥</button>
+  <button class="glass helpBtn" id="helpBtn" aria-label="How to play and camera views" aria-haspopup="dialog">?</button>
   <div class="stat" id="lvlChip"><span class="statLabel">Level</span><b id="lvlName">Bedroom DJ</b><div class="bar"><i id="xpFill"></i></div></div>
   <div class="stat" id="vibeChip"><span class="statLabel">Crowd</span><b><span id="vibeVal">0</span>% <span class="hypedWord">hyped</span></b><div class="bar vibe"><i id="vibeFill"></i></div></div>
   <div class="stat tempo"><span class="statLabel">Tempo</span><b><span id="bpmVal">124</span> bpm</b></div>
@@ -147,6 +148,21 @@
     <div class="btnRow"><button class="btn" id="resetProgress">Reset quests and XP</button></div>
   </div>
 </aside>
+
+<div class="helpSheet" id="helpSheet" role="dialog" aria-modal="true" aria-labelledby="helpTitle" hidden>
+  <div class="helpCard">
+    <h2 id="helpTitle">How to play</h2>
+    <div id="helpText"></div>
+    <h3>Views</h3>
+    <div class="cams helpCams">
+      <button class="glass" data-cam="island">Island</button>
+      <button class="glass" data-cam="front">Front row</button>
+      <button class="glass" data-cam="dj">Shigost's view</button>
+      <button class="glass" data-cam="reef">Reef</button>
+    </div>
+    <button class="helpClose" id="helpClose" type="button">Got it</button>
+  </div>
+</div>
 
 <div id="toasts" aria-live="polite"></div>
 
