@@ -640,7 +640,7 @@ let projT=0, projAcc=0;
 const SCREEN_DT=()=>anyPlaying()?1/20:0;
 function heart(c,x,y,s){c.beginPath();c.moveTo(x,y+s*0.3);c.bezierCurveTo(x,y,x-s*0.5,y,x-s*0.5,y+s*0.3);c.bezierCurveTo(x-s*0.5,y+s*0.6,x,y+s*0.8,x,y+s);c.bezierCurveTo(x,y+s*0.8,x+s*0.5,y+s*0.6,x+s*0.5,y+s*0.3);c.bezierCurveTo(x+s*0.5,y,x,y,x,y+s*0.3);c.fill();}
 function sparkle(c,x,y,s){c.beginPath();c.moveTo(x,y-s);c.quadraticCurveTo(x,y,x+s,y);c.quadraticCurveTo(x,y,x,y+s);c.quadraticCurveTo(x,y,x-s,y);c.quadraticCurveTo(x,y,x,y-s);c.fill();}
-const nrm=x=>clamp((x+95)/60,0,1);
+const nrm=x=>Number.isFinite(x)?clamp((x+95)/60,0,1):0;
 function drawProj(dt){
   const c=pc,W=PW,H=PH,pal=PALS[show.palette]||PALS.candy;
   const b=show.bassReact?lv.bass:0.2;
@@ -1619,7 +1619,7 @@ function updateFarWorld(T){
   u.uNight.value=night; u.uTime.value=T;
   u.uZen.value.copy(FAR.zen[0]).lerp(FAR.zen[1],night); u.uHaze.value.copy(FAR.haze[0]).lerp(FAR.haze[1],night);
   farWorld.sky.position.copy(camera.position);
-  const cp=camera.position, wl=-0.31+waveHjs(cp.x,cp.z,T); uwK=sstep(0.12,-0.12,cp.y-wl);
+  const cp=camera.position, wl=-0.31+waveHjs(cp.x,cp.z,T), uk=sstep(0.12,-0.12,cp.y-wl); uwK=Number.isFinite(uk)?uk:0;
   _uwc.copy(UW_FOG.day).lerp(UW_FOG.night,night); u.uUw.value=uwK; u.uUwCol.value.copy(_uwc);
   // fog colour is applied after the sRGB encode, so it takes the sRGB value of the same colour
   // fog colour is mixed in after the sRGB encode, so it takes the sRGB value of the same colour as the sky's horizon
@@ -2308,34 +2308,55 @@ function update3D(dt,T){
   crowd.sticks.material.opacity=night*(0.3+0.7*e);
 
   projAcc+=dt; if(projAcc>=SCREEN_DT()){ drawProj(projAcc); projTex.needsUpdate=true; projAcc=0; }
-  renderer.render(scene,camera);
 }
 
 /* ================= MAIN LOOP ================= */
 const SKY={d1:[245,240,248],d2:[231,223,240],n1:[44,34,92],n2:[16,10,36],i0:[43,29,58],i1:[248,240,252]};
 const mixRGB=(a,b,t)=>'rgb('+a.map((v,i)=>Math.round(v+(b[i]-v)*t)).join(',')+')';
 let last=performance.now(), T=0, uiT=0;
+/* Each part of the frame runs on its own, so one failing part can't freeze the rest: the first error from each part is
+   logged once (with its stack) and kept in window.vibeBoothErrors, and the scene keeps rendering. Add ?debug to the URL
+   to see these, plus the GPU and audio details, on screen (handy on a phone with no console). */
+const DEBUG=/[?&]debug\b/.test(location.search), frameErr={};
+window.vibeBoothErrors=[];
+function reportErr(part,e){ if(frameErr[part]) return; frameErr[part]=true; const msg=part+': '+(e&&e.stack?e.stack:String(e));
+  window.vibeBoothErrors.push(msg); console.error('[Vibe Booth] '+msg); if(DEBUG) debugPanel(); }
+function guarded(part,fn){ try{ fn(); }catch(e){ reportErr(part,e); } }
+let dbgEl=null, dbgFrames=0, dbgFps=0, dbgT=0;
+function debugPanel(){ if(!DEBUG) return; if(!dbgEl){ dbgEl=document.createElement('pre'); dbgEl.style.cssText='position:fixed;left:8px;bottom:8px;z-index:99;max-width:92vw;max-height:40vh;overflow:auto;margin:0;padding:8px;font:11px/1.35 monospace;white-space:pre-wrap;background:rgba(10,8,20,.82);color:#e8f6ff;border-radius:8px;pointer-events:auto'; document.body.append(dbgEl); }
+  let gpu='?', gl=renderer&&renderer.getContext(); try{ const x=gl.getExtension('WEBGL_debug_renderer_info'); gpu=x?gl.getParameter(x.UNMASKED_RENDERER_WEBGL):gl.getParameter(gl.RENDERER); }catch(_){}
+  const bad=renderer?renderer.info.programs.filter(p=>p.diagnostics&&!p.diagnostics.runnable).map(p=>p.name):[];
+  let ctx=null; try{ ctx=Tone.getContext(); }catch(_){}
+  dbgEl.textContent=['fps '+dbgFps+'  WebGL'+(renderer&&renderer.capabilities.isWebGL2?'2':'1')+'  '+gpu,
+    'audio '+(ctx?ctx.state+' '+ctx.sampleRate+'Hz':'?')+'  muffle '+(uwLP?Math.round(uwLP.frequency.value)+'Hz':'-')+'  underwater '+uwK.toFixed(2)+'  bass '+lv.bass.toFixed(2),
+    bad.length?'shader failed: '+bad.join(', '):'shaders ok ('+(renderer?renderer.info.programs.length:0)+')',
+    ...window.vibeBoothErrors].join('\n'); }
+window.addEventListener('error',e=>reportErr('page',e.error||e.message));
+window.addEventListener('unhandledrejection',e=>reportErr('promise',e.reason));
 function frame(now){
   requestAnimationFrame(frame);
   const dt=Math.min(0.05,(now-last)/1000); last=now; T+=dt;
-  if(analyser){
+  guarded('audio levels',()=>{ if(analyser){
     fft=analyser.getValue();
     let b=0,m=0,h=0; for(let i=0;i<2;i++) b+=nrm(fft[i]); for(let i=2;i<12;i++) m+=nrm(fft[i]); for(let i=12;i<40;i++) h+=nrm(fft[i]);
     lv.bass+=(b/2-lv.bass)*0.5; lv.mid+=(m/10-lv.mid)*0.4; lv.high+=(h/28-lv.high)*0.4;
-  }
+  } });
   beatPulse=Math.max(0,beatPulse-dt*3.5);
   vibe=Math.max(0,vibe-dt*(anyPlaying()?0.35:1.5));
-  update3D(dt,T);
+  guarded('scene update',()=>update3D(dt,T));
+  guarded('render',()=>renderer.render(scene,camera));
+  if(DEBUG){ dbgFrames++; dbgT+=dt; if(dbgT>=1){ dbgFps=dbgFrames; dbgFrames=0; dbgT=0; guarded('debug',debugPanel); } }
   uiT+=dt;
-  if(uiT>0.1){ uiT=0; if(amb){ const al=ambLevel*(anyPlaying()?0.45:1); amb.gain.rampTo(al,0.4); if(ambVerb) ambVerb.gain.rampTo(al*0.8,0.4); }
-    if(uwLP) uwLP.frequency.rampTo(20000*Math.pow(650/20000,uwK),0.25);
+  if(uiT>0.1) guarded('ui',()=>{ uiT=0; if(amb){ const al=ambLevel*(anyPlaying()?0.45:1); amb.gain.rampTo(al,0.4); if(ambVerb) ambVerb.gain.rampTo(al*0.8,0.4); }
+    // the muffle only follows a valid underwater reading; anything else leaves the music fully open
+    if(uwLP){ const k=Number.isFinite(uwK)?clamp(uwK,0,1):0; uwLP.frequency.rampTo(20000*Math.pow(650/20000,k),0.25); }
     $('#vibeFill').style.width=vibe+'%'; $('#vibeVal').textContent=Math.round(vibe);
     const rs=document.documentElement.style;
     rs.setProperty('--sky1',mixRGB(SKY.d1,SKY.n1,night)); rs.setProperty('--sky2',mixRGB(SKY.d2,SKY.n2,night));
     rs.setProperty('--stageInk',mixRGB(SKY.i0,SKY.i1,night));
     rs.setProperty('--stageGlass',night>0.5?'rgba(40,28,70,.55)':'rgba(255,255,255,.62)');
     rs.setProperty('--stageLine',night>0.5?'rgba(255,255,255,.16)':'rgba(43,29,58,.12)');
-  }
+  });
 }
 
 /* ================= KNOBS ================= */
