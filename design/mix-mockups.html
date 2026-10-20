@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mix view mockups</title>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..700;1,9..144,400..700&family=DM+Sans:opsz,wght@9..40,400..700&display=swap" rel="stylesheet">
+<!-- Design mockups for the Mix view redesign (Phase 1). Static only: nothing here is wired to the game.
+     Open with ?v=a|b&size=desk|phone-p|phone-l&mode=all|basic&tip=1 -->
+<style>
+:root{
+  --a:#ff5fa2; --aDeep:#d93d82; --b:#3fb2ea; --bDeep:#1f8fc9;
+  --ink:#f7effb; --muted:#b9a8cc; --panel:#1d1529; --panel2:#261c36; --sunk:#160f20; --line:#3b2f54;
+  --mint:#2fbf96; --butter:#ffc93c; --grape:#8f6bff;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden;font-family:'DM Sans',system-ui,sans-serif;color:var(--ink);background:#0d3a6e}
+.stage{position:fixed;inset:0;background-size:cover;background-position:center}
+.desk .stage{background-image:url(bg-desk.jpg)} .phone-p .stage{background-image:url(bg-phone-p.jpg)} .phone-l .stage{background-image:url(bg-phone-l.jpg)}
+.brand{position:fixed;top:16px;left:20px;font-family:'Fraunces',serif;font-style:italic;font-weight:600;font-size:1.6rem;color:#fff;text-shadow:0 2px 10px rgba(0,0,0,.35)}
+.chips{position:fixed;top:14px;right:16px;display:flex;gap:6px}
+.chip{background:rgba(20,14,32,.55);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.18);border-radius:999px;padding:6px 12px;font-size:.78rem;color:#fff}
+.chip b{font-family:'Fraunces',serif}
+
+/* ---------- equipment parts ---------- */
+.unit{background:linear-gradient(180deg,#2a2040,#1b1428);border:1px solid var(--line);border-radius:22px;box-shadow:0 20px 50px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.07)}
+.tag{font-family:'Fraunces',serif;font-style:italic;font-weight:700;font-size:.95rem;display:inline-grid;place-items:center;width:24px;height:24px;border-radius:50%;color:#1b1428}
+.A .tag{background:var(--a)} .B .tag{background:var(--b)}
+/* the platter: raised rim, vinyl grooves, sheen, centre label, glow ring, position marker, drop shadow */
+.platter{--s:170px;position:relative;width:var(--s);height:var(--s);border-radius:50%;flex:none;
+  background:radial-gradient(circle at 50% 50%,transparent 0 30%,rgba(0,0,0,0) 30%),repeating-radial-gradient(circle,#191322 0 1.2px,#2b2238 1.2px 2.6px);
+  box-shadow:0 0 0 7px #3a3050,0 0 0 9px var(--c),0 0 22px 6px color-mix(in srgb,var(--c) 45%,transparent),0 18px 26px 8px rgba(0,0,0,.55),inset 0 0 0 2px rgba(255,255,255,.05)}
+.A .platter{--c:var(--a)} .B .platter{--c:var(--b)}
+.platter::before{content:'';position:absolute;inset:0;border-radius:50%;background:conic-gradient(from 30deg,transparent 0 8%,rgba(255,255,255,.14) 12%,transparent 18% 50%,rgba(255,255,255,.10) 56%,transparent 62%)}
+.platter .label{position:absolute;inset:31%;border-radius:50%;background:radial-gradient(circle at 35% 30%,color-mix(in srgb,var(--c) 60%,#fff),var(--c) 60%,color-mix(in srgb,var(--c) 70%,#000));box-shadow:0 2px 6px rgba(0,0,0,.4);display:grid;place-items:center}
+.platter .label::after{content:'';width:9%;height:9%;border-radius:50%;background:#120d1a}
+.platter .marker{position:absolute;left:50%;top:4px;width:5px;height:20%;margin-left:-2.5px;border-radius:3px;background:#fff;box-shadow:0 0 8px #fff;transform-origin:50% calc(var(--s) / 2 - 4px)}
+.playing .platter .marker{transform:rotate(118deg)}
+.platter .pp{position:absolute;inset:0;margin:auto;width:34%;height:34%;border-radius:50%;background:rgba(15,10,24,.72);border:2px solid #fff;display:grid;place-items:center;box-shadow:0 4px 12px rgba(0,0,0,.4)}
+.platter .pp::before{content:'';margin-left:12%;border-style:solid;border-width:calc(var(--s)*.07) 0 calc(var(--s)*.07) calc(var(--s)*.11);border-color:transparent transparent transparent #fff}
+.playing .platter .pp{display:none}
+.deckTitle{display:flex;align-items:center;gap:8px;min-width:0}
+.deckTitle .nm{font-weight:700;font-size:.9rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.deckTitle .st{font-size:.72rem;color:var(--muted)}
+.playBtn{display:flex;align-items:center;justify-content:center;gap:8px;border:none;border-radius:16px;font:700 1rem 'DM Sans',sans-serif;color:#fff;padding:12px 18px;min-width:120px;box-shadow:0 5px 0 var(--d),0 10px 18px rgba(0,0,0,.4);background:var(--c)}
+.A .playBtn{--c:var(--a);--d:var(--aDeep)} .B .playBtn{--c:var(--b);--d:var(--bDeep)}
+.playBtn i{display:block;border-style:solid;border-width:7px 0 7px 11px;border-color:transparent transparent transparent #fff}
+.playing .playBtn i{border:none;width:12px;height:14px;background:linear-gradient(90deg,#fff 0 35%,transparent 35% 65%,#fff 65%)}
+/* pads */
+.pads{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}
+.pad{border-radius:11px;border:1px solid rgba(255,255,255,.08);background:linear-gradient(180deg,#3a2e52,#2a2140);box-shadow:inset 0 -3px 0 rgba(0,0,0,.35),0 2px 4px rgba(0,0,0,.3);font:600 .78rem 'DM Sans',sans-serif;color:#fff;padding:12px 4px;text-align:center;position:relative}
+.pad::before{content:'';position:absolute;left:50%;top:5px;width:16px;height:3px;margin-left:-8px;border-radius:2px;background:var(--c);opacity:.55}
+.A .pad{--c:var(--a)} .B .pad{--c:var(--b)}
+.pad.on{background:linear-gradient(180deg,color-mix(in srgb,var(--c) 75%,#fff),var(--c));box-shadow:0 0 14px var(--c),inset 0 -3px 0 rgba(0,0,0,.2)}
+.pad.on::before{background:#fff;opacity:1}
+.fxPads{display:grid;grid-template-columns:repeat(4,1fr);gap:7px}
+.fx{--c:var(--grape)} .fx.on{--c:var(--mint)}
+.secLab{font-size:.68rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0 0 6px}
+/* knobs, meters, faders */
+.knob{display:flex;flex-direction:column;align-items:center;gap:2px;font-size:.66rem;color:var(--muted)}
+.knob i{--v:50%;display:block;width:38px;height:38px;border-radius:50%;position:relative;background:conic-gradient(from 225deg,var(--c) 0 calc(var(--v)*.75),#3b2f54 0 75%,transparent 0);padding:4px}
+.knob i::before{content:'';position:absolute;inset:4px;border-radius:50%;background:radial-gradient(circle at 40% 35%,#4a3e62,#241b34);box-shadow:0 3px 6px rgba(0,0,0,.5)}
+.knob i::after{content:'';position:absolute;left:50%;top:7px;width:3px;height:11px;margin-left:-1.5px;border-radius:2px;background:#fff;transform-origin:50% 12px;transform:rotate(calc((var(--v) - 50%) * 2.7 / 1%  * 1deg))}
+.chA .knob i{--c:var(--a)} .chB .knob i{--c:var(--b)}
+.meter{display:flex;flex-direction:column-reverse;gap:3px;width:10px}
+.meter s{display:block;height:7px;border-radius:2px;background:#33284a}
+.meter s.l{background:var(--mint);box-shadow:0 0 6px var(--mint)} .meter s.l.y{background:var(--butter);box-shadow:0 0 6px var(--butter)} .meter s.l.r{background:var(--a);box-shadow:0 0 6px var(--a)}
+.vfader{position:relative;width:34px;height:var(--h,130px);display:flex;justify-content:center}
+.vfader::before{content:'';width:6px;height:100%;border-radius:4px;background:#120c1b;box-shadow:inset 0 1px 2px #000}
+.vfader b{position:absolute;left:0;right:0;top:var(--p,22%);height:22px;border-radius:6px;background:linear-gradient(180deg,#f3ecf8,#b9adc8);box-shadow:0 4px 8px rgba(0,0,0,.5)}
+.vfader b::after{content:'';position:absolute;left:4px;right:4px;top:10px;height:2px;background:var(--c)}
+.chA .vfader b{--c:var(--a)} .chB .vfader b{--c:var(--b)}
+.xfader{position:relative;height:30px;display:flex;align-items:center}
+.xfader::before{content:'';flex:1;height:6px;border-radius:4px;background:linear-gradient(90deg,var(--a),#120c1b 30% 70%,var(--b))}
+.xfader b{position:absolute;left:50%;width:44px;height:26px;margin-left:-22px;border-radius:7px;background:linear-gradient(180deg,#f3ecf8,#b9adc8);box-shadow:0 4px 8px rgba(0,0,0,.5)}
+.xfader b::after{content:'';position:absolute;left:21px;top:4px;bottom:4px;width:2px;background:#1b1428}
+.xLab{display:flex;justify-content:space-between;font-size:.7rem;color:var(--muted)}
+.xLab span:first-child{color:var(--a);font-weight:700} .xLab span:last-child{color:var(--b);font-weight:700}
+.show{display:grid;grid-template-columns:repeat(4,1fr);gap:7px}
+.act{border:none;border-radius:14px;font:700 .86rem 'DM Sans',sans-serif;color:#fff;padding:11px 4px;box-shadow:0 4px 0 rgba(0,0,0,.25)}
+.act.build{background:var(--grape)} .act.drop{background:var(--a)} .act.fire{background:linear-gradient(160deg,#ffb23a,#ff4f7b)} .act.laser{background:linear-gradient(160deg,#3fb2ea,#8f6bff)}
+.allTog{display:inline-flex;align-items:center;gap:8px;font-size:.78rem;color:var(--muted)}
+.allTog i{width:34px;height:20px;border-radius:999px;background:#3b2f54;position:relative}
+.allTog i::after{content:'';position:absolute;top:3px;left:3px;width:14px;height:14px;border-radius:50%;background:#fff}
+.all .allTog i{background:var(--mint)} .all .allTog i::after{left:17px}
+.locked{display:inline-flex;align-items:center;gap:6px;font-size:.74rem;color:var(--muted);border:1px dashed var(--line);border-radius:999px;padding:5px 10px}
+.tabs{display:flex;gap:3px;background:var(--sunk);border-radius:14px;padding:3px}
+.tabs b{flex:1;text-align:center;font-weight:600;font-size:.82rem;color:var(--muted);padding:7px 2px;border-radius:11px}
+.tabs b.on{background:var(--panel2);color:#fff}
+.tip{position:absolute;z-index:9;width:230px;background:#fff;color:#2b1d3a;border-radius:12px;padding:9px 12px;font-size:.8rem;line-height:1.35;box-shadow:0 8px 24px rgba(0,0,0,.35)}
+.tip b{display:block;font-size:.78rem}
+.tip::after{content:'';position:absolute;left:var(--ax,50%);bottom:-7px;margin-left:-7px;border-style:solid;border-width:7px 7px 0;border-color:#fff transparent transparent}
+.basic .adv{display:none!important}
+.mixer{display:flex;flex-direction:column;gap:10px}
+.strips{display:flex;gap:10px;justify-content:center;align-items:flex-end}
+.strip{display:flex;flex-direction:column;align-items:center;gap:6px}
+.kgrid{display:grid;grid-template-columns:1fr 1fr;gap:4px 8px}
+.faderRow{display:flex;gap:6px;align-items:flex-end}
+.chName{font-family:'Fraunces',serif;font-style:italic;font-weight:700}
+.chA .chName{color:var(--a)} .chB .chName{color:var(--b)}
+
+/* ================= VARIATION A: controller dock ================= */
+.va.desk .dock{position:fixed;left:16px;right:16px;bottom:14px;display:grid;grid-template-columns:1fr auto 1fr;gap:14px;padding:12px 16px 12px;align-items:center}
+.va.desk .platter{--s:150px}
+.va .vfader{--h:100px}
+.va .deck{display:grid;grid-template-columns:auto 1fr;gap:16px;align-items:center}
+.va .deck.B{grid-template-columns:1fr auto}
+.va .deck.B .platterCol{order:2}
+.va .platterCol{display:flex;flex-direction:column;align-items:center;gap:14px}
+.va .side{display:flex;flex-direction:column;gap:10px;min-width:0}
+.va .mixer{width:330px;background:var(--sunk);border-radius:18px;padding:12px;border:1px solid var(--line)}
+.va.desk .topbar{position:fixed;left:16px;right:16px;bottom:calc(14px + var(--dockH,318px) + 10px);display:flex;justify-content:space-between;align-items:center}
+.va.desk .topbar .tabs{width:380px;background:rgba(22,15,32,.8);backdrop-filter:blur(8px)}
+.va.desk .topbar .show{width:440px}
+.va.desk .stage{bottom:var(--dockH,318px)}
+/* phone portrait (A and B share the collapsed sheet idea, A puts platters side by side as twin decks) */
+.phone-p .sheet{position:fixed;left:0;right:0;bottom:0;border-radius:24px 24px 0 0;padding:8px 12px 18px;display:flex;flex-direction:column;gap:10px}
+.phone-p .grab{width:40px;height:5px;border-radius:4px;background:var(--line);margin:0 auto 2px}
+.va.phone-p .twin{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.va.phone-p .deck{display:flex;flex-direction:column;align-items:center;gap:12px}
+.va.phone-p .platter{--s:126px}
+.va.phone-p .playBtn{min-width:0;width:100%;padding:11px 8px}
+/* phone landscape: held like a controller, platters under the thumbs */
+.va.phone-l .deck{position:fixed;bottom:12px;display:flex;flex-direction:column;align-items:center;gap:10px}
+.va.phone-l .deck.A{left:14px} .va.phone-l .deck.B{right:14px}
+.va.phone-l .platter{--s:142px}
+.va.phone-l .playBtn{min-width:120px;padding:9px 12px}
+.va.phone-l .center{position:fixed;left:50%;transform:translateX(-50%);bottom:10px;width:360px;padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+.va.phone-l .center .row{display:flex;gap:8px;align-items:center}
+
+/* ================= VARIATION B: booth panel ================= */
+.vb.desk .panel{position:fixed;top:14px;right:14px;bottom:14px;width:410px;padding:14px;display:flex;flex-direction:column;gap:12px;overflow:hidden}
+.vb .twin{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.vb .deck{display:flex;flex-direction:column;align-items:center;gap:12px;background:var(--sunk);border-radius:18px;padding:12px 8px 12px}
+.vb.desk .platter{--s:132px}
+.vb .playBtn{min-width:0;width:100%;padding:10px 8px}
+.vb .mixer{background:var(--sunk);border-radius:18px;padding:10px 12px}
+.vb .padSwitch{display:flex;gap:6px;margin-bottom:8px}
+.vb .padSwitch b{flex:1;text-align:center;border-radius:10px;padding:6px;font-size:.78rem;background:var(--panel2);color:var(--muted)}
+.vb .padSwitch b.on.A{background:var(--a);color:#fff}
+.vb.phone-p .platter{--s:112px}
+.vb.phone-p .deck{padding:10px 6px}
+.vb.phone-l .panel{position:fixed;top:8px;right:8px;bottom:8px;width:360px;padding:10px;display:flex;flex-direction:column;gap:8px}
+.vb.phone-l .platter{--s:92px}
+.vb.phone-l .deck{padding:8px 6px;gap:8px}
+.vb.phone-l .playBtn{padding:7px 6px;font-size:.86rem}
+.vlabel{position:fixed;left:50%;transform:translateX(-50%);bottom:auto;top:calc(50% - 14px);opacity:.92;background:#fff;color:#2b1d3a;border-radius:999px;padding:5px 12px;font-weight:700;font-size:.78rem;box-shadow:0 4px 14px rgba(0,0,0,.3);z-index:20}
+</style>
+</head>
+<body>
+<div class="stage"></div>
+<div id="root"></div>
+<script>
+const q=new URLSearchParams(location.search), V=q.get('v')||'a', SIZE=q.get('size')||'desk', MODE=q.get('mode')||'all', TIP=q.get('tip')==='1';
+document.body.className=['v'+V,SIZE,MODE].join(' ');
+const knob=(lab,v,adv)=>`<div class="knob ${adv?'adv':''}"><i style="--v:${v}%"></i>${lab}</div>`;
+const meter=n=>`<div class="meter">${[...Array(10)].map((_,i)=>`<s class="${i<n?'l':''} ${i>=6?'y':''} ${i>=8?'r':''}"></s>`).join('')}</div>`;
+const platter=()=>`<div class="platter"><div class="label"></div><div class="marker"></div><div class="pp"></div></div>`;
+const playBtn=(id,playing)=>`<button class="playBtn" aria-label="${playing?'Pause':'Play'} Deck ${id}"><i></i>${playing?'Pause':'Play'}</button>`;
+const title=(id,name,st)=>`<div class="deckTitle"><span class="tag">${id}</span><span><div class="nm">${name}</div><div class="st">${st}</div></span></div>`;
+const pads=on=>`<div class="adv"><p class="secLab">Performance pads</p><div class="pads">${['Intro','Build','Drop','Break','Loop 4','Roll'].map(p=>`<div class="pad ${p===on?'on':''}">${p}</div>`).join('')}</div></div>`;
+const strip=(ch,vol,lvl)=>`<div class="strip ch${ch}"><span class="chName">${ch}</span><div class="kgrid adv">${knob('Hi',55)}${knob('Mid',50)}${knob('Low',62)}${knob('Filter',50)}</div><div class="faderRow">${ch==='A'?meter(lvl):''}<div class="vfader" style="--p:${vol}"><b></b></div>${ch==='B'?meter(lvl):''}</div><span class="knob">Volume</span></div>`;
+const xf=()=>`<div><div class="xLab"><span>A</span><span>Crossfader</span><span>B</span></div><div class="xfader"><b></b></div></div>`;
+const fx=()=>`<div class="adv"><p class="secLab">Effects</p><div class="fxPads">${['Echo','Reverb','Phaser','Gate'].map((p,i)=>`<div class="pad fx ${i===1?'on':''}">${p}</div>`).join('')}</div></div>`;
+const show=()=>`<div class="show"><button class="act build adv">Build</button><button class="act drop">Drop</button><button class="act fire adv">Flames</button><button class="act laser adv">Lasers</button></div>`;
+const toggle=()=>`<span class="allTog"><i></i>Show all controls</span>`;
+const lockNote=()=>MODE==='basic'?`<span class="locked">🔒 Pads, EQ, and effects unlock as you finish quests</span>`:'';
+const tabs=()=>`<div class="tabs"><b class="on">Mix</b><b>Studio</b><b>Show</b><b>Learn</b></div>`;
+const chips=`<div class="brand">Vibe Booth.</div><div class="chips"><span class="chip">ⓘ</span><span class="chip"><b>34%</b> hyped</span></div>`;
+let h='';
+if(V==='a'&&SIZE==='desk'){
+  h=chips+`<div class="topbar">${tabs()}<div style="display:flex;gap:16px;align-items:center;background:rgba(22,15,32,.8);backdrop-filter:blur(8px);border-radius:16px;padding:6px 6px 6px 14px">${toggle()}<div class="show" style="width:${MODE==='basic'?'110px':'440px'};grid-template-columns:${MODE==='basic'?'1fr':'repeat(4,1fr)'}">${MODE==='basic'?'<button class="act drop">Drop</button>':'<button class="act build">Build</button><button class="act drop">Drop</button><button class="act fire">Flames</button><button class="act laser">Lasers</button>'}</div></div></div>
+  <div class="dock unit">
+    <div class="deck A playing"><div class="platterCol">${platter()}${playBtn('A',1)}</div><div class="side">${title('A','Sunset Pier','House · Drop, bar 3 of 16')}${pads('Drop')}${lockNote()}</div></div>
+    <div class="mixer">${MODE==='basic'?`<div class="strips">${strip('A','30%',7)}${strip('B','30%',0)}</div>`:`<div class="strips">${strip('A','30%',7)}${strip('B','30%',0)}</div>`}${xf()}${fx()}</div>
+    <div class="deck B"><div class="platterCol">${platter()}${playBtn('B',0)}</div><div class="side">${title('B','Rooftop Feelings','Melodic house · Tap to play')}${pads()}</div></div>
+  </div>`;
+}
+if(V==='a'&&SIZE==='phone-p'){
+  h=chips+`<div class="sheet unit"><div class="grab"></div>
+    <div class="twin"><div class="deck A playing">${title('A','Sunset Pier','Drop · bar 3')}${platter()}${playBtn('A',1)}</div><div class="deck B">${title('B','Rooftop Feelings','Tap to play')}${platter()}${playBtn('B',0)}</div></div>
+    ${xf()}<div class="show" style="grid-template-columns:${MODE==='basic'?'1fr':'repeat(4,1fr)'}">${MODE==='basic'?'<button class="act drop">Drop</button>':'<button class="act build">Build</button><button class="act drop">Drop</button><button class="act fire">Flames</button><button class="act laser">Lasers</button>'}</div>
+    <div style="display:flex;justify-content:space-between;align-items:center">${toggle()}<span class="locked" style="font-size:.7rem">Swipe up for mixer and pads</span></div>
+    ${tabs()}</div>`;
+}
+if(V==='a'&&SIZE==='phone-l'){
+  h=`<div class="brand" style="font-size:1.2rem;top:10px">Vibe Booth.</div><div class="chips" style="top:8px"><span class="chip">ⓘ</span><span class="chip"><b>34%</b> hyped</span></div>
+  <div class="deck A playing">${platter()}${playBtn('A',1)}</div><div class="deck B">${platter()}${playBtn('B',0)}</div>
+  <div class="center unit"><div class="row"><div class="strips" style="gap:14px;align-items:center;flex:1">
+    <div class="strip chA" style="flex-direction:row;gap:6px">${meter(7)}<div class="vfader" style="--h:84px;--p:25%"><b></b></div></div>
+    <div style="flex:1;display:flex;flex-direction:column;gap:8px">${MODE==='basic'?'<button class="act drop">Drop</button>':'<div class="show" style="grid-template-columns:1fr 1fr"><button class="act build">Build</button><button class="act drop">Drop</button><button class="act fire">Flames</button><button class="act laser">Lasers</button></div>'}</div>
+    <div class="strip chB" style="flex-direction:row;gap:6px"><div class="vfader" style="--h:84px;--p:25%"><b></b></div>${meter(0)}</div></div></div>
+    ${xf()}</div>`;
+}
+if(V==='b'&&SIZE==='desk'){
+  h=chips.replace('class="chips"','class="chips" style="right:440px"')+`<div class="panel unit">
+    <div style="display:flex;justify-content:space-between;align-items:center">${tabs().replace('class="tabs"','class="tabs" style="width:250px"')}${toggle()}</div>
+    <div class="twin"><div class="deck A playing">${title('A','Sunset Pier','Drop · bar 3')}${platter()}${playBtn('A',1)}</div><div class="deck B">${title('B','Rooftop Feelings','Tap to play')}${platter()}${playBtn('B',0)}</div></div>
+    <div class="mixer"><div class="strips" style="gap:40px">${strip('A','30%',7).replace(/knob\('?Hi/g,'')}${strip('B','30%',0)}</div>${xf()}</div>
+    <div class="adv"><div class="padSwitch"><b class="on A">Deck A pads</b><b>Deck B pads</b></div><div class="A">${pads('Drop').replace('<p class="secLab">Performance pads</p>','')}</div></div>
+    ${fx()}${lockNote()}${show()}</div>`;
+}
+if(V==='b'&&SIZE==='phone-p'){
+  h=chips+`<div class="sheet unit"><div class="grab"></div>
+    <div class="twin"><div class="deck A playing">${title('A','Sunset Pier','Drop · bar 3')}${platter()}${playBtn('A',1)}</div><div class="deck B">${title('B','Rooftop Feelings','Tap to play')}${platter()}${playBtn('B',0)}</div></div>
+    <div class="mixer" style="padding:8px 10px"><div style="display:flex;gap:10px;align-items:center"><div class="strip chA" style="flex-direction:row">${meter(7).replace('class="meter"','class="meter" style="transform:scale(.7)"')}</div><div style="flex:1">${xf()}</div><div class="strip chB" style="flex-direction:row">${meter(0).replace('class="meter"','class="meter" style="transform:scale(.7)"')}</div></div></div>
+    ${show()}<div style="display:flex;justify-content:space-between;align-items:center">${toggle()}${lockNote()}</div>${tabs()}</div>`;
+}
+if(V==='b'&&SIZE==='phone-l'){
+  h=`<div class="brand" style="font-size:1.2rem;top:10px">Vibe Booth.</div><div class="chips" style="top:8px;right:380px"><span class="chip">ⓘ</span><span class="chip"><b>34%</b> hyped</span></div>
+  <div class="panel unit"><div class="twin"><div class="deck A playing">${platter()}${playBtn('A',1)}</div><div class="deck B">${platter()}${playBtn('B',0)}</div></div>
+  ${xf()}${show()}${tabs()}</div>`;
+}
+document.getElementById('root').innerHTML=h;
+// one example tooltip, pointing at a real control
+if(TIP){ const t=document.createElement('div'); t.className='tip';
+  const target=document.querySelector('.xfader'); const r=target.getBoundingClientRect();
+  t.innerHTML='<b>Crossfader</b>Slide toward A or B to choose which deck the crowd hears. In the middle, you hear both.';
+  document.body.append(t); const w=230; let x=Math.min(innerWidth-w-8,Math.max(8,r.left+r.width/2-w/2)); t.style.left=x+'px'; t.style.top=(r.top-t.offsetHeight-14)+'px'; t.style.setProperty('--ax',(r.left+r.width/2-x)+'px'); }
+const dock=document.querySelector('.dock'); if(dock) document.body.style.setProperty('--dockH',dock.offsetHeight+'px');
+const lab=document.createElement('div'); lab.className='vlabel'; lab.textContent='Variation '+V.toUpperCase()+(V==='a'?': Controller dock':': Booth panel')+(MODE==='basic'?' (new player)':' (all controls)'); document.body.append(lab);
+</script>
+</body>
+</html>
