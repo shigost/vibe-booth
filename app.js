@@ -2706,11 +2706,29 @@ function bindGlobal(){
   $('#resetProgress').addEventListener('click',()=>{ if(confirm('Reset all quests and XP? Your saved tracks stay.')){ progress={xp:0,done:{}}; store.set('progress',progress); show.paintPattern=false; show.paintText=false; saveShow(); renderMissions(); } });
   window.addEventListener('resize',()=>{ document.body.classList.toggle('sheet-open',isMobile()&&$('#console').classList.contains('open')); });
   if(window.ResizeObserver) new ResizeObserver(()=>updateViewTargets()).observe($('#console'));
+  /* Phones: iPhones mute web audio while the ring/silent switch is on, unless the page says it is media playback.
+     audioSession (Safari 17+) does that directly; on older iPhones a silent looping <audio> element started from the tap
+     moves the page into the media channel. Mobile browsers also suspend audio when the tab goes to the background or a
+     call comes in, so any later tap, or coming back to the tab, wakes it again. */
+  const unlockPhoneAudio=()=>{
+    try{ if(navigator.audioSession) navigator.audioSession.type='playback'; }catch(_){}
+    try{ if(!window.__silentEl){ const a=document.createElement('audio'); a.setAttribute('playsinline',''); a.loop=true; a.volume=0.01;
+        // 0.1s of silence as a tiny WAV
+        const n=4410, b=new ArrayBuffer(44+n*2), v=new DataView(b), w=(o,t)=>{ for(let i=0;i<t.length;i++) v.setUint8(o+i,t.charCodeAt(i)); };
+        w(0,'RIFF'); v.setUint32(4,36+n*2,true); w(8,'WAVE'); w(12,'fmt '); v.setUint32(16,16,true); v.setUint16(20,1,true); v.setUint16(22,1,true); v.setUint32(24,44100,true); v.setUint32(28,88200,true); v.setUint16(32,2,true); v.setUint16(34,16,true); w(36,'data'); v.setUint32(40,n*2,true);
+        a.src=URL.createObjectURL(new Blob([b],{type:'audio/wav'})); window.__silentEl=a; }
+      const p=window.__silentEl.play(); if(p&&p.catch) p.catch(()=>{}); }catch(_){}
+  };
+  const wakeAudio=()=>{ if(!audioReady) return; try{ const c=Tone.getContext(); if(c.state!=='running'){ unlockPhoneAudio(); c.resume(); } }catch(_){} };
+  ['pointerdown','touchend','keydown'].forEach(ev=>document.addEventListener(ev,wakeAudio,{passive:true}));
+  document.addEventListener('visibilitychange',()=>{ if(!document.hidden) wakeAudio(); });
   $('#enterBtn').addEventListener('click',async()=>{
+    unlockPhoneAudio();
     // a 'playback' context uses bigger audio buffers, which trades a little latency for no crackle under load.
     // Tone's Transport/Draw/Destination exports stay bound to the load-time context, so app code uses Tone.getTransport() etc.
     try{ const old=Tone.getContext(); Tone.setContext(new Tone.Context({latencyHint:'playback',lookAhead:0.2})); old.dispose(); }catch(e){ console.warn('audio context',e); }
     try{ await Tone.start(); }catch(e){}
+    try{ const c=Tone.getContext(); if(c.state!=='running') await c.resume(); }catch(e){}
     try{ initAudio(); }catch(e){ console.error(e); toast('Audio could not start in this browser. The visuals still work.','warn'); }
     $('#gate').remove();
     showStartMusic();
