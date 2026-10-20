@@ -499,7 +499,7 @@ function togglePlay(d){
   const o=otherDeck(d);
   if(!(o.playing||o.pending)) setBPM(d.track.bpm);
   if(Tone.getTransport().state!=='started'){ globalStep=0; Tone.getTransport().start('+0.06'); }
-  d.pending=true; deckUI(d);
+  d.pending=true; deckUI(d); markPlayed();
   complete('play');
   if(o.playing&&(o.id==='A'?xfVal<0.12:xfVal>0.88)) complete('prep');
 }
@@ -520,7 +520,7 @@ function refreshDeckInfo(d){
   if(!d.track) return;
   const t=d.track, pill=$('#p'+d.id);
   pill.querySelector('.dkName').textContent=t.name;
-  pill.querySelector('.dkMeta').textContent=t.style+', '+t.bpm+' bpm';
+  pill.querySelector('.dkMeta').textContent=d.playing?t.style+', '+t.bpm+' bpm':'Tap to play';
   const a=STYLE_ART[t.style]||['#ff5fa2','#ffd84d'];
   pill.querySelector('.mini i').style.setProperty('--art','linear-gradient(135deg,'+a[0]+','+a[1]+')');
 }
@@ -533,10 +533,39 @@ function toggleLoop(id){ if(!audioReady) return; const d=decks[id]; const b=$('#
   const bar=Math.floor(Math.max(0,d.pos-1)/16); d.loop={start:Math.floor(bar/4)*4,len:4}; b.classList.add('on'); if(d.playing) complete('loop'); }
 function rollOn(id,on){ if(!audioReady) return; const d=decks[id]; const b=$('#chan'+id+' .rollBtn');
   if(on&&d.playing){ d.roll={len:2,i:0,start:null}; b.classList.add('on'); complete('roll'); } else { d.roll=null; b.classList.remove('on'); } }
+/* Getting beginners to press play: a play/pause icon on each deck, a glow ring on Deck A until the first play (and again
+   after 30 quiet seconds), a "Start the music" button right after entering, and a "Tap to play" bubble over the 3D decks. */
+let everPlayed=!!store.get('played',false), silentSince=performance.now();
+function markPlayed(){ if(!everPlayed){ everPlayed=true; store.set('played',true); } hideStartMusic(); }
+function updatePlayNudge(){ if(!decks.A) return;
+  const busy=decks.A.playing||decks.A.pending||decks.B.playing||decks.B.pending, now=performance.now();
+  if(busy) silentSince=now;
+  const nudge=!busy&&!startEl&&(!everPlayed||now-silentSince>30000);
+  const p=$('#pA'); p.classList.toggle('nudge',nudge); p.classList.toggle('soft',!!show.reduceFlash); }
+let startEl=null;
+function showStartMusic(){ if(everPlayed||startEl) return;
+  startEl=document.createElement('div'); startEl.className='startMusic';
+  startEl.innerHTML='<button class="startBtn" type="button" aria-label="Start the music: play Deck A">Start the music <span aria-hidden="true">▶</span></button><button class="startSkip" type="button">or explore first</button>';
+  document.body.append(startEl);
+  startEl.querySelector('.startBtn').addEventListener('click',()=>{ hideStartMusic(); if(audioReady&&!(decks.A.playing||decks.A.pending)) togglePlay(decks.A); });
+  startEl.querySelector('.startSkip').addEventListener('click',()=>{ hideStartMusic(); silentSince=performance.now(); });
+  setTimeout(()=>{ const b=startEl&&startEl.querySelector('.startBtn'); if(b) b.focus({preventScroll:true}); },60); }
+function hideStartMusic(){ if(startEl){ startEl.remove(); startEl=null; } }
+// floating bubble over the 3D turntables, until the first play
+let deckBubble=null; const _db=new THREE.Vector3();
+function updateDeckBubble(){
+  if(!deckBubble){ deckBubble=document.createElement('button'); deckBubble.className='deckBubble'; deckBubble.type='button'; deckBubble.textContent='Tap to play';
+    deckBubble.setAttribute('aria-label','Play Deck A'); deckBubble.addEventListener('click',()=>{ if(audioReady&&!(decks.A.playing||decks.A.pending)) togglePlay(decks.A); });
+    document.body.append(deckBubble); }
+  let show_=audioReady&&!everPlayed&&!startEl&&uwK<0.5&&jogs.A&&!rideActive();
+  if(show_){ jogs.A.getWorldPosition(_db); _db.x=0; _db.y+=0.45; _db.project(camera);
+    const x=(_db.x+1)/2*view.w, y=(1-_db.y)/2*view.h; show_=_db.z<1&&x>20&&x<view.w-20&&y>40&&y<view.h-20;
+    if(show_) deckBubble.style.transform='translate('+x.toFixed(1)+'px,'+y.toFixed(1)+'px) translate(-50%,-100%)'; }
+  deckBubble.style.display=show_?'block':'none'; }
 function deckUI(d){
   const pill=$('#p'+d.id);
   pill.classList.toggle('live',d.playing); pill.classList.toggle('cued',d.pending);
-  pill.setAttribute('aria-label',(d.playing?'Stop':'Play')+' deck '+d.id);
+  pill.setAttribute('aria-label',(d.playing||d.pending?'Stop':'Play')+' Deck '+d.id);
   if(d.pending) pill.querySelector('.dkMeta').textContent='Starting on the next bar';
   else refreshDeckInfo(d);
 }
@@ -2458,10 +2487,12 @@ function frame(now){
   vibe=Math.max(0,vibe-dt*(anyPlaying()?0.35:1.5));
   guarded('scene update',()=>update3D(dt,T));
   guarded('render',()=>renderer.render(scene,camera));
+  guarded('deck hints',updateDeckBubble);
   if(DEBUG){ dbgFrames++; dbgT+=dt; if(dbgT>=1){ dbgFps=dbgFrames; dbgFrames=0; dbgT=0; guarded('debug',debugPanel); } }
   uiT+=dt;
   if(uiT>0.1) guarded('ui',()=>{ uiT=0; if(amb){ const al=ambLevel*(anyPlaying()?0.45:1); amb.gain.rampTo(al,0.4); if(ambVerb) ambVerb.gain.rampTo(al*0.8,0.4); }
     // the muffle only follows a valid underwater reading; anything else leaves the music fully open
+    updatePlayNudge();
     if(uwLP){ const k=Number.isFinite(uwK)?clamp(uwK,0,1):0; uwLP.frequency.rampTo(20000*Math.pow(650/20000,k),0.25); }
     $('#vibeFill').style.width=vibe+'%'; $('#vibeVal').textContent=Math.round(vibe);
     const rs=document.documentElement.style;
@@ -2682,7 +2713,8 @@ function bindGlobal(){
     try{ await Tone.start(); }catch(e){}
     try{ initAudio(); }catch(e){ console.error(e); toast('Audio could not start in this browser. The visuals still work.','warn'); }
     $('#gate').remove();
-    setTimeout(()=>toast('Tip: tap Shigost, the flame cannons, or the round screen'),1600);
+    showStartMusic();
+    setTimeout(()=>{ if(!startEl) toast('Tip: tap Shigost, the flame cannons, or the round screen'); },1600);
   });
 }
 
