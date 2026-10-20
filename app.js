@@ -1673,7 +1673,8 @@ function init3D(){
   const CG=coralGeos(), KG=critterGeos(), dmc=new THREE.Object3D(); isl.coralMats=[]; isl.anemones=[];
   const reef=(geo,mat,n,cols,d0,d1,sc0,sc1,opt)=>{ opt=opt||{}; const im=new THREE.InstancedMesh(geo,mat,n), cc=cols.map(C); let placed=0; geo.computeBoundingBox(); const gh=Math.max(0.05,geo.boundingBox.max.y);
     for(let i=0;i<n;i++){ const p=randOcean(shelfD(d0),shelfD(d1)); if(!p) continue; const [x,z]=p; const y=terrainH(x,z);
-      dmc.position.set(x,y-0.02,z); const outward=Math.atan2(x,z-OCZ); dmc.rotation.set(opt.tilt?(Math.random()-0.5)*0.4:0,opt.face?outward:Math.random()*6.28,0); const ys=0.85+Math.random()*0.35; let k=sc0+Math.random()*(sc1-sc0); k=Math.min(k,(-0.31-0.3-y)/(gh*ys)); if(k<0.35) continue; dmc.scale.set(k,k*ys,k); dmc.updateMatrix(); im.setMatrixAt(placed,dmc.matrix); im.setColorAt(placed,cc[placed%cc.length]); if(opt.list) opt.list.push(new THREE.Vector3(x,y,z)); (isl.coralPts||(isl.coralPts=[])).push([x,y,z]); placed++; }
+      dmc.position.set(x,y-0.02,z); const outward=Math.atan2(x,z-OCZ); dmc.rotation.set(opt.tilt?(Math.random()-0.5)*0.4:0,opt.face?outward:Math.random()*6.28,0); const ys=0.85+Math.random()*0.35; let k=sc0+Math.random()*(sc1-sc0); k=Math.min(k,(-0.31-0.3-y)/(gh*ys)); if(k<0.35) continue; dmc.scale.set(k,k*ys,k); dmc.updateMatrix(); im.setMatrixAt(placed,dmc.matrix); im.setColorAt(placed,cc[placed%cc.length]); if(opt.list) opt.list.push(new THREE.Vector3(x,y,z));
+      const bb=geo.boundingBox; (isl.coralPts||(isl.coralPts=[])).push([x,y,z,y-0.02+gh*k*ys,Math.max(-bb.min.x,bb.max.x,-bb.min.z,bb.max.z)*k]); placed++; }
     im.count=placed; im.castShadow=true; inner.add(im); isl.coralMats.push(mat); return im; };
   const cm=(o)=>applyUnderwater(glowify(new THREE.MeshStandardMaterial(Object.assign({color:0xffffff,roughness:0.65},o||{}))));
   reef(CG.brain,cm(),50,['#ffb36b','#b98bff','#ff8fb8','#ffd98a','#9fe0a0'],5.0,11,0.9,1.7);
@@ -1701,6 +1702,7 @@ function init3D(){
   FISH.forEach(sp=>{ const im=new THREE.InstancedMesh(fishGeo(sp),isl.fishM,sp.n); inner.add(im);
     const data=[...Array(sp.n)].map((_,i)=>{ if(sp.name==='clown'&&isl.anemones.length){ const a=isl.anemones[i%isl.anemones.length]; return {home:a,r:0.25+Math.random()*0.25,a:Math.random()*6.28,sp:1.2+Math.random(),y:0.25+Math.random()*0.2}; }
       return {off:5.4+Math.random()*4.6,a:Math.random()*6.28,sp:(0.04+Math.random()*0.05)*(Math.random()<0.5?1:-1),depth:0.9+Math.random()*2.7,ph:Math.random()*6.28,school:Math.floor(i/3)}; });
+    const si=isl.fishSets.length; im.userData.tap=()=>{ if(rideActive()&&tapHit&&tapHit.instanceId!==undefined) rideFish(si,tapHit.instanceId,true); else waterTap(); };
     isl.fishSets.push({im,data,sp}); });
   // volcano: a big rugged cone with jungle at its foot, ash and scorched rock up top, and a glowing crater
   const vg=new THREE.LatheGeometry(VPTS.map(p=>new THREE.Vector2(p[0],p[1])),VSEG,0,Math.PI*2);
@@ -1985,10 +1987,10 @@ function applyLens(fov,near){
   camera.setViewOffset(fw,fh,view.c,view.s,view.w,view.h); camera.updateProjectionMatrix();
 }
 // leaving POV: rebuild the orbit from wherever the POV camera is looking, so the tween starts there
-function orbitFromCamera(){
+function orbitFromCamera(fov){
   const d=10; camera.getWorldDirection(_pf);
   cam.tx=camera.position.x+_pf.x*d; cam.ty=camera.position.y+_pf.y*d; cam.tz=camera.position.z+_pf.z*d;
-  cam.r=d; cam.phi=Math.acos(clamp(-_pf.y,-1,1)); cam.theta=Math.atan2(-_pf.x,-_pf.z); cam.fov=pov.fov;
+  cam.r=d; cam.phi=Math.acos(clamp(-_pf.y,-1,1)); cam.theta=Math.atan2(-_pf.x,-_pf.z); cam.fov=fov===undefined?pov.fov:fov;
 }
 function updatePOV(dt){
   sg.root.updateMatrixWorld(true);
@@ -2023,7 +2025,96 @@ function updatePOV(dt){
   camera.position.copy(pov.pos); camera.quaternion.copy(pov.q);
   applyLens(pov.fov,0.05);
 }
+/* ---------- Reef view: ride along with a reef fish ---------- */
+// The ridden fish leaves its usual lap and swims a long loop: out over the upper drop-off weaving between coral heads,
+// back along the deeper drop-off. The route is checked against coral, islets, the lava river mouths, the seabed, and the
+// surface. Follow cam by default, fish-eye view as a toggle (not in Comfort mode). Tap another fish to hop onto it.
+const FISH_NAMES={clown:'clownfish',idol:'Moorish idol',butterfly:'butterflyfish',parrot:'parrotfish'};
+const RIDE_CEIL=-0.85, RIDE_SPEED=1.05;
+const ride={on:false,set:-1,i:-1,f:null,mode:'follow',yaw:0,pitch:0,idle:0,fov:58,fovT:58,hop:0,enter:0,
+  pos:new THREE.Vector3(),look:new THREE.Vector3(),h:new THREE.Vector3(0,0,1),fp:new THREE.Vector3(),fd:new THREE.Vector3(0,0,1)};
+function rideActive(){ return ride.on&&!!(isl.fishSets&&ride.f); }
+function rideObstacles(){ return isl.rideObs||(isl.rideObs=[
+  ...(isl.coralPts||[]).map(([x,y,z,top,rad])=>({x,z,top:top===undefined?y+0.5:top,rad:rad===undefined?0.6:rad})),
+  ...islets().map(o=>({x:o.x,z:o.z,top:1,rad:o.R*1.7+0.3})),
+  ...(isl.rivers||[]).map(r=>({x:r.end.x,z:r.end.z,top:1,rad:2.3}))]); }
+// the lowest a swimmer may go at (x,z) and still clear the seabed and anything standing on it within reach (Infinity: blocked)
+function rideFloor(x,z,reach){ let y=terrainH(x,z)+0.45; for(const o of rideObstacles()){ const d=Math.hypot(x-o.x,z-o.z); if(d<o.rad+reach){ if(o.top+0.4>RIDE_CEIL) return Infinity; y=Math.max(y,o.top+0.4); } } return y; }
+function rideRoute(){ if(isl.rideRoute) return isl.rideRoute;
+  const aS=0.7, aE=2.45, N=12, at=(a,sd)=>{ const r=islandR(a)+sd; return [Math.cos(a)*r,OCZ+Math.sin(a)*r]; };
+  let best=null;
+  for(let tries=0;tries<40;tries++){
+    const wps=[];
+    const leg=(k,back)=>{ const u=k/(N-1), a=back?aE-(aE-aS)*u:aS+(aE-aS)*u, sd0=back?10.2:8.2, ty=back?-2.3-0.25*Math.sin(k*1.3):-1.05-0.18*Math.sin(k*1.9);
+      let pick=null, pd=-1;
+      for(let c=0;c<14;c++){ const sd=sd0+(c===0?0:(Math.random()-0.5)*1.6)+0.45*Math.sin(k*1.7+tries), da=c===0?0:(Math.random()-0.5)*0.05, [x,z]=at(a+da,sd), fl=rideFloor(x,z,0.6);
+        if(fl>RIDE_CEIL) continue; let dmin=99; for(const o of rideObstacles()) if(o.top+0.4>RIDE_CEIL) dmin=Math.min(dmin,Math.hypot(x-o.x,z-o.z)-o.rad); if(dmin>pd){ pd=dmin; pick=new THREE.Vector3(x,Math.min(RIDE_CEIL,Math.max(ty,fl)),z); } }
+      if(pick) wps.push(pick); };
+    for(let k=0;k<N;k++) leg(k,false); for(let k=0;k<N;k++) leg(k,true);
+    if(wps.length<N*2-2) continue;
+    const curve=new THREE.CatmullRomCurve3(wps,true,'centripetal'), M=700, pts=[]; let bad=0;
+    for(let j=0;j<M;j++){ const p=curve.getPoint(j/M), fl=rideFloor(p.x,p.z,0.35); if(fl>RIDE_CEIL){ bad++; } p.y=Math.min(RIDE_CEIL,Math.max(p.y,fl)); p.fl=fl; pts.push(p); }
+    // smooth the depth (never below the floor, never above the ceiling) so climbs over coral are gentle
+    for(let it=0;it<6;it++){ const ys=pts.map(p=>p.y); pts.forEach((p,j)=>{ const a=ys[(j+M-3)%M], b=ys[(j+3)%M]; p.y=Math.min(RIDE_CEIL,Math.max(p.fl,(a+b+ys[j]*2)/4)); }); }
+    if(!best||bad<best.bad) best={pts,bad};
+    if(bad===0) break;
+  }
+  const pts=best.pts, cum=[0]; for(let j=1;j<=pts.length;j++) cum.push(cum[j-1]+pts[j-1].distanceTo(pts[j%pts.length]));
+  return isl.rideRoute={pts,cum,len:cum[pts.length],bad:best.bad};
+}
+const _rp=new THREE.Vector3(), _rq=new THREE.Vector3();
+// position and unit heading at distance s along the loop
+function routeAt(s,out,dir){ const R=rideRoute(), n=R.pts.length; s=((s%R.len)+R.len)%R.len;
+  let lo=0, hi=n; while(hi-lo>1){ const m=(lo+hi)>>1; if(R.cum[m]<=s) lo=m; else hi=m; }
+  const a=R.pts[lo], b=R.pts[(lo+1)%n], t=(s-R.cum[lo])/Math.max(1e-6,R.cum[lo+1]-R.cum[lo]); out.lerpVectors(a,b,t); if(dir) dir.subVectors(b,a).normalize(); return out; }
+function routeNearest(p){ const R=rideRoute(); let bi=0, bd=1e9; R.pts.forEach((q,j)=>{ const d=q.distanceToSquared(p); if(d<bd){ bd=d; bi=j; } }); return R.cum[bi]; }
+function fishWorld(set,i){ const im=isl.fishSets[set].im, m=new THREE.Matrix4(); im.getMatrixAt(i,m); return new THREE.Vector3().setFromMatrixPosition(m); }
+function rideFish(set,i,hop){ const fs=isl.fishSets[set]; if(!fs) return; const f=fs.data[i]; if(!f||f===ride.f) return;
+  if(ride.f) ride.f.riding=false;
+  f.riding=true; if(!(f.rideW>0)) f.rs=routeNearest(fishWorld(set,i));
+  ride.set=set; ride.i=i; ride.f=f; ride.hop=hop?1:0; ride.yaw=ride.pitch=0;
+  rideUI(); }
+function startRide(){ ride.enter=0; ride.pos.copy(camera.position); camera.getWorldDirection(_rq); ride.look.copy(camera.position).addScaledVector(_rq,6);
+  if(!ride.f){ const k=Math.max(0,isl.fishSets.findIndex(x=>x.sp.name==='butterfly')), R=rideRoute(); let bi=0, bd=1e9;
+    isl.fishSets[k].data.forEach((f,i)=>{ const d=fishWorld(k,i).distanceToSquared(R.pts[0]); if(d<bd){ bd=d; bi=i; } }); rideFish(k,bi,false); }
+  ride.fov=ride.fovT=58; rideUI(); }
+function stopRide(){ ride.on=false; rideUI(); }
+let rideBar=null;
+function rideUI(){
+  if(!rideBar){ rideBar=document.createElement('div'); rideBar.className='reefBar';
+    rideBar.innerHTML='<span class="glass reefLab"></span><button class="glass reefEye" type="button" aria-pressed="false">Fish eyes</button>';
+    document.body.append(rideBar); rideBar.querySelector('.reefEye').addEventListener('click',()=>{ ride.mode=ride.mode==='eye'?'follow':'eye'; rideUI(); }); }
+  const on=rideActive(), comfort=!!show.comfort; if(comfort) ride.mode='follow';
+  rideBar.style.display=on?'flex':'none'; if(!on) return;
+  const sp=isl.fishSets[ride.set].sp, name=FISH_NAMES[sp.name]||'fish';
+  rideBar.querySelector('.reefLab').textContent='Riding a '+name+'. Tap another fish to hop on.';
+  const b=rideBar.querySelector('.reefEye'); b.style.display=comfort?'none':''; b.textContent=ride.mode==='eye'?'Follow':'Fish eyes'; b.setAttribute('aria-pressed',ride.mode==='eye'?'true':'false');
+  b.classList.toggle('on',ride.mode==='eye'); }
+function updateRide(dt){
+  const comfort=!!show.comfort, eye=ride.mode==='eye'&&!comfort, sp=isl.fishSets[ride.set].sp, L=sp.L;
+  ride.enter=Math.min(1,ride.enter+dt*0.7); ride.hop=Math.max(0,ride.hop-dt*1.4);
+  // heading turns smoothly (slower in Comfort mode); look offset eases back after a few idle seconds
+  ride.h.lerp(ride.fd,1-Math.exp(-dt*(comfort?1.4:eye?4:2.6))).normalize();
+  ride.idle+=dt; if(ride.idle>2.5){ const d=Math.exp(-dt*1.6); ride.yaw*=d; ride.pitch*=d; }
+  const yaw=Math.atan2(ride.h.x,ride.h.z)+ride.yaw, hp=Math.asin(clamp(ride.h.y,-1,1))*(eye?1:0.4)+ride.pitch;
+  _rq.set(Math.sin(yaw)*Math.cos(hp),Math.sin(hp),Math.cos(yaw)*Math.cos(hp));
+  const sw=(comfort?0.3:1), want=new THREE.Vector3(), lookAt=new THREE.Vector3();
+  if(eye){ want.copy(ride.fp).addScaledVector(ride.h,L*0.55); want.y+=L*0.05;
+    const wig=Math.sin(T*10+ride.i)*0.025; lookAt.copy(want).add(new THREE.Vector3(Math.sin(yaw+wig)*Math.cos(hp),Math.sin(hp),Math.cos(yaw+wig)*Math.cos(hp)).multiplyScalar(6)); }
+  else { // a three-quarter view from behind, above, and a little to one side: the back, flank, and tail all show
+    const back=0.8+L*2.6, side=0.18+L*0.5; want.copy(ride.fp).addScaledVector(_rq,-back); want.y+=0.5+L*0.9; want.x+=Math.cos(yaw)*side; want.z-=Math.sin(yaw)*side; want.x+=Math.cos(yaw)*Math.sin(T*1.3)*0.05*sw; want.z-=Math.sin(yaw)*Math.sin(T*1.3)*0.05*sw;
+    lookAt.copy(ride.fp).addScaledVector(_rq,2.4); lookAt.y=ride.fp.y; } // aim ahead: the fish sits low in frame with the reef it swims toward above it
+  // damped follow: gentle on arrival and when hopping fish, tight once settled (looser in Comfort mode)
+  const kPos=ride.enter<1||ride.hop>0?1.8:eye?14:comfort?2.6:4.2;
+  ride.pos.lerp(want,1-Math.exp(-dt*kPos)); ride.look.lerp(lookAt,1-Math.exp(-dt*(eye?14:5)));
+  // stay underwater and off the bottom
+  ride.pos.y=Math.min(-0.5,Math.max(ride.pos.y,surfRaw(ride.pos.x,ride.pos.z)+0.25));
+  camera.position.copy(ride.pos); camera.lookAt(ride.look);
+  ride.fov+=(ride.fovT-ride.fov)*(1-Math.exp(-dt*6)); applyLens(ride.fov,eye?0.02:0.05);
+}
 function setPreset(name){
+  if(rideActive()&&name!=='reef') orbitFromCamera(ride.fov);
+  ride.on=name==='reef'; if(ride.on&&isl.fishSets) startRide(); else rideUI();
   if(povActive()&&name!=='dj') orbitFromCamera();
   pov.on=name==='dj';
   if(pov.on){ pov.yaw=pov.pitch=0; pov.idle=0; pov.enter=0; pov.had=false; pov.fovT=55; }
@@ -2031,11 +2122,18 @@ function setPreset(name){
   Object.assign(camT,PRESETS[name]);
   $$('.cams button').forEach(b=>b.classList.toggle('on',b.dataset.cam===name));
 }
-const raycaster=new THREE.Raycaster(), ndc=new THREE.Vector2();
+const raycaster=new THREE.Raycaster(), ndc=new THREE.Vector2(); let tapHit=null;
+const _fm=new THREE.Matrix4(), _fv=new THREE.Vector3();
+function nearestFishOnScreen(px,py,maxPx){ let best=null, bd=maxPx*maxPx;
+  isl.fishSets.forEach((fs,si)=>{ for(let i=0;i<fs.im.count;i++){ if(fs.data[i]===ride.f) continue; fs.im.getMatrixAt(i,_fm); _fv.setFromMatrixPosition(_fm).project(camera); if(_fv.z>1) continue;
+    const sx=(_fv.x+1)/2*view.w, sy=(1-_fv.y)/2*view.h, d=(sx-px)*(sx-px)+(sy-py)*(sy-py); if(d<bd){ bd=d; best=[si,i]; } } });
+  return best; }
 function pick(x,y){
   ndc.set(x/view.w*2-1,-(y/view.h)*2+1); raycaster.setFromCamera(ndc,camera);
+  // in the Reef view fish are small and quick, so a tap within about 36px of one hops onto it
+  if(rideActive()){ const near=nearestFishOnScreen(x,y,36); if(near) return {userData:{tap:()=>rideFish(near[0],near[1],true)}}; }
   const hits=raycaster.intersectObjects(inner.children,true);
-  for(const h of hits){ let o=h.object; while(o&&o!==inner){ if(o.userData.tap){ tapPt.copy(h.point); return o; } o=o.parent; } }
+  for(const h of hits){ let o=h.object; while(o&&o!==inner){ if(o.userData.tap){ tapPt.copy(h.point); tapHit=h; return o; } o=o.parent; } }
   return null;
 }
 function setupPointer(canvas){
@@ -2046,6 +2144,11 @@ function setupPointer(canvas){
     if(!p){ const now=performance.now(); if(now-hoverT>90&&e.pointerType==='mouse'){ hoverT=now; canvas.style.cursor=pick(e.clientX,e.clientY)?'pointer':'grab'; } return; }
     const dx=e.clientX-p.x, dy=e.clientY-p.y; p.x=e.clientX; p.y=e.clientY;
     if(down) down.moved+=Math.abs(dx)+Math.abs(dy);
+    if(rideActive()){
+      if(pts.size===1&&(!down||down.moved>6)){ ride.yaw=clamp(ride.yaw-dx*0.004,-1,1); ride.pitch=clamp(ride.pitch-dy*0.004,-0.6,0.6); ride.idle=0; }
+      else if(pts.size===2){ const a=[...pts.values()]; const d=Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y); if(pinch>0) ride.fovT=clamp(ride.fovT*pinch/d,40,75); pinch=d; ride.idle=0; }
+      return;
+    }
     if(povActive()){
       if(pts.size===1&&(!down||down.moved>6)){ pov.yaw=clamp(pov.yaw+dx*0.005,-POV_YAW,POV_YAW); pov.pitch=clamp(pov.pitch+dy*0.005,POV_DOWN,POV_UP); pov.idle=0; }
       else if(pts.size===2){ const a=[...pts.values()]; const d=Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y); if(pinch>0) pov.fovT=clamp(pov.fovT*pinch/d,35,70); pinch=d; pov.idle=0; }
@@ -2060,7 +2163,7 @@ function setupPointer(canvas){
   };
   canvas.addEventListener('pointerup',up);
   canvas.addEventListener('pointercancel',e=>{ pts.delete(e.pointerId); down=null; });
-  canvas.addEventListener('wheel',e=>{ e.preventDefault(); if(povActive()){ pov.fovT=clamp(pov.fovT*(1+e.deltaY*0.001),35,70); return; } camT.r=clamp(camT.r*(1+e.deltaY*0.001),7,95); },{passive:false});
+  canvas.addEventListener('wheel',e=>{ e.preventDefault(); if(rideActive()){ ride.fovT=clamp(ride.fovT*(1+e.deltaY*0.001),40,75); return; } if(povActive()){ pov.fovT=clamp(pov.fovT*(1+e.deltaY*0.001),35,70); return; } camT.r=clamp(camT.r*(1+e.deltaY*0.001),7,95); },{passive:false});
 }
 
 /* island reactions: the ground, sea, and seabed never deform. Beats nudge the camera and ripple the water off the stage;
@@ -2129,8 +2232,8 @@ function update3D(dt,T){
   const k=1-Math.exp(-dt*3.2);
   for(const key in cam) cam[key]+=(camT[key]-cam[key])*k;
   view.c+=(view.cT-view.c)*k; view.s+=(view.sT-view.s)*k;
-  const e=vibe/100, inPOV=povActive();
-  if(!inPOV){
+  const e=vibe/100, inPOV=povActive(), inRide=rideActive();
+  if(!inPOV&&!inRide){
     camera.position.set(cam.tx+cam.r*Math.sin(cam.phi)*Math.sin(cam.theta),cam.ty+cam.r*Math.cos(cam.phi),cam.tz+cam.r*Math.sin(cam.phi)*Math.cos(cam.theta));
     // collision: if the line from the target out to the camera dips into the island or seabed, pull the camera in
     // (quickly when closing in, gently when it can move back out), then keep it at least 0.3 above the surface
@@ -2231,15 +2334,25 @@ function update3D(dt,T){
   if(isl.emberT<=0){ isl.emberT=isl.erupt>0?0.03:0.14; spark(isl.top,[[1,0.45,0.08],[1,0.72,0.2],[1,0.3,0.05]],isl.erupt>0?8:2,isl.erupt>0?6:1.8); if(isl.vent2&&Math.random()<0.4) spark(isl.vent2,[[1,0.5,0.1]],1,1.2);
     if(Math.random()<0.35) isl.rivers.forEach(r=>spark(r.end,[[0.92,0.96,1],[0.8,0.85,0.9]],2,0.7)); }
   { const dmf=crowd.dummy; isl.fishM.userData.u.uTime.value=T; isl.fishM.userData.u.uGlow.value=night*(0.15+lv.bass*0.6);
-    isl.fishSets.forEach(({im,data})=>{ data.forEach((f,i)=>{ let x,y,z,vx,vz;
+    isl.fishSets.forEach(({im,data},si)=>{ data.forEach((f,i)=>{ let x,y,z,vx,vz,vy=0;
         if(f.home){ f.a+=dt*f.sp; x=f.home.x+Math.cos(f.a)*f.r; z=f.home.z+Math.sin(f.a)*f.r; y=Math.min(-0.65,f.home.y+f.y+Math.sin(T*2+i)*0.04); vx=-Math.sin(f.a); vz=Math.cos(f.a); }
         else { f.a+=f.sp*dt; const p=(a)=>{ const r=islandR(a)+shelfD(f.off)+Math.sin(T*0.4+f.ph)*0.5; return [Math.cos(a)*r,OCZ+Math.sin(a)*r]; };
           [x,z]=p(f.a); const [nx,nz]=p(f.a+Math.sign(f.sp)*0.01); vx=nx-x; vz=nz-z;
           y=Math.min(-0.65,Math.max(terrainH(x,z)+0.3,-0.31-f.depth+Math.sin(T*0.8+f.ph)*0.12)); }
+        if(f.home&&!(f.rideW>0)) vy=0;
         if(isl.scare){ const age=T-isl.scare.t, dx=x-isl.scare.x, dz=z-isl.scare.z, dd=Math.hypot(dx,dz);
           if(age<2.5&&dd<3.5){ const k=(1-age/2.5)*(3.5-dd)*0.9/(dd+0.3); x+=dx*k; z+=dz*k; y=Math.min(-0.65,Math.max(terrainH(x,z)+0.25,y-(3.5-dd)*0.25*(1-age/2.5))); } }
-        dmf.position.set(x,y,z); dmf.rotation.set(0,Math.atan2(-vz,vx),Math.sin(T*1.5+i)*0.08); dmf.scale.setScalar(1); dmf.updateMatrix(); im.setMatrixAt(i,dmf.matrix); });
+        if(f.riding) f.rideW=Math.min(1,(f.rideW||0)+dt/1.2); else if(f.rideW>0) f.rideW=Math.max(0,f.rideW-dt/1.6);
+        if(f.rideW>0){ f.rs+=dt*RIDE_SPEED; routeAt(f.rs,_rp,_rq); const w=sstep(0,1,f.rideW), hl=Math.hypot(vx,vz)||1;
+          x+=(_rp.x-x)*w; y+=(_rp.y-y)*w; z+=(_rp.z-z)*w; vx=vx/hl+(_rq.x-vx/hl)*w; vz=vz/hl+(_rq.z-vz/hl)*w; vy=_rq.y*w; }
+        const pitch=Math.atan2(vy,Math.hypot(vx,vz)||1);
+        dmf.position.set(x,y,z); dmf.rotation.set(0,Math.atan2(-vz,vx),pitch+Math.sin(T*1.5+i)*0.08);
+        // in the fish-eye view the ridden fish is hidden, so the camera never sees the inside of its own head
+        dmf.scale.setScalar(f===ride.f&&ride.on&&ride.mode==='eye'&&!show.comfort?0.001:1); dmf.updateMatrix(); im.setMatrixAt(i,dmf.matrix);
+        if(f===ride.f){ ride.fp.set(x,y,z); ride.fd.set(vx,vy,vz).normalize(); } });
       im.instanceMatrix.needsUpdate=true; }); }
+
+  if(inRide) updateRide(dt);
 
   // lasers
   laserBurst=Math.max(0,laserBurst-dt);
@@ -2518,7 +2631,7 @@ function buildShow(){
   $('#projText').addEventListener('input',e=>{ show.text=e.target.value; if(show.text.trim()) show.paintText=true; saveShow(); checkPaint(); });
   $('#projSpeed').value=show.speed; $('#projSpeed').addEventListener('input',e=>{ show.speed=+e.target.value; saveShow(); });
   const tog=(id,key)=>{ const i=$(id); i.checked=!!show[key]; i.addEventListener('change',()=>{ show[key]=i.checked; saveShow(); }); };
-  tog('#tLaserAuto','laserAuto'); tog('#tFlameAuto','flameAuto'); tog('#tBass','bassReact'); tog('#tBeatStrobe','beatStrobe'); tog('#tReduce','reduceFlash'); tog('#tComfort','comfort');
+  tog('#tLaserAuto','laserAuto'); tog('#tFlameAuto','flameAuto'); tog('#tBass','bassReact'); tog('#tBeatStrobe','beatStrobe'); tog('#tReduce','reduceFlash'); tog('#tComfort','comfort'); $('#tComfort').addEventListener('change',()=>rideUI());
   const sb=$('#sStrobe');
   sb.addEventListener('pointerdown',()=>{strobeHold=true;});
   ['pointerup','pointerleave','pointercancel'].forEach(ev=>sb.addEventListener(ev,()=>{strobeHold=false;}));
