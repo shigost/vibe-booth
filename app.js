@@ -2219,15 +2219,51 @@ function fxPool(n,size,additive){
 }
 function islFx(){ return isl.fx||(isl.fx={spray:fxPool(90,0.13,false),glow:fxPool(70,0.32,true)}); }
 let fxSnd=null;
+/* A layered water splash: a soft "sploosh" of pink noise through a band-pass that sweeps down, a sine "bloop" gliding
+   down with a few bubble blips after it, a tail of droplets falling back, and in deep water a low round thump.
+   depth (metres of water under the tap) sets the character: shallow is a light, short, high splish; deep is a lower,
+   rounder, longer plunk. Everything is varied a little on every tap, and two voice sets take turns so quick taps overlap.
+   Only basic Tone nodes (no AudioWorklets); every synth is monophonic, so each trigger goes through monoAt. */
+function makeSplash(dest){
+  const out=new Tone.Gain(0.55).connect(dest);
+  const voice=()=>{
+    const bp=new Tone.Filter({type:'bandpass',frequency:1500,Q:1.1}).connect(out);
+    const swish=new Tone.NoiseSynth({noise:{type:'pink'},envelope:{attack:0.012,decay:0.24,sustain:0,release:0.05}}).connect(bp);
+    const bloop=new Tone.Synth({oscillator:{type:'sine'},envelope:{attack:0.004,decay:0.13,sustain:0,release:0.03}}).connect(out);
+    const blip=new Tone.Synth({oscillator:{type:'sine'},envelope:{attack:0.002,decay:0.035,sustain:0,release:0.01}}).connect(out);
+    const drop=new Tone.Synth({oscillator:{type:'sine'},envelope:{attack:0.002,decay:0.05,sustain:0,release:0.01}}).connect(out);
+    const thump=new Tone.Synth({oscillator:{type:'sine'},envelope:{attack:0.01,decay:0.3,sustain:0,release:0.05}}).connect(out);
+    swish.volume.value=-8; bloop.volume.value=-12; blip.volume.value=-22; drop.volume.value=-24; thump.volume.value=-16;
+    return {bp,swish,bloop,blip,drop,thump}; };
+  const V=[voice(),voice()]; let k=0;
+  return (t,depth,level)=>{
+    const v=V[k++%2], r=(a,b)=>a+Math.random()*(b-a), d=clamp((depth-0.15)/2.5,0,1), lv=(level===undefined?1:level)*r(0.8,1)*lerp(1,0.7,d);
+    // sploosh: soft attack, the band-pass sweeping downward, lower and longer when deep
+    const t0=monoAt(v.swish,t,0.2), f0=lerp(3600,1700,d)*r(0.88,1.12), f1=lerp(900,320,d)*r(0.88,1.12), len=lerp(0.2,0.32,d);
+    v.bp.frequency.cancelScheduledValues(t0); v.bp.frequency.setValueAtTime(f0,t0); v.bp.frequency.exponentialRampToValueAtTime(f1,t0+len);
+    v.bp.Q.setValueAtTime(lerp(0.9,1.6,d),t0); v.swish.triggerAttackRelease(len,t0,0.7*lv);
+    // bloop: a fast downward glide, a little after the hit
+    const tb=monoAt(v.bloop,t0+r(0.015,0.035),0.12), b0=lerp(760,480,d)*r(0.9,1.1), b1=lerp(220,130,d)*r(0.9,1.1);
+    v.bloop.triggerAttackRelease(b0,0.12,tb,lerp(0.55,0.8,d)*lv); v.bloop.frequency.exponentialRampToValueAtTime(b1,tb+0.12);
+    // 2 to 4 bubble blips, rising slightly as bubbles do
+    let tt=tb+0.09; for(let i=0,n=2+Math.floor(Math.random()*3);i<n;i++){ tt=monoAt(v.blip,tt+r(0.025,0.07),0.04);
+      const p=r(700,1300)*lerp(1.15,0.8,d); v.blip.triggerAttackRelease(p,0.03,tt,r(0.25,0.55)*lv); v.blip.frequency.exponentialRampToValueAtTime(p*1.35,tt+0.03); }
+    // droplets falling back over the next 300-600 ms (fewer and later when deep)
+    let td=t0+r(0.25,0.35); for(let i=0,n=Math.round(lerp(5,3,d))+Math.floor(Math.random()*2);i<n;i++){ td=monoAt(v.drop,td+r(0.04,0.12),0.05);
+      const p=r(1800,3200)*lerp(1.1,0.85,d); v.drop.triggerAttackRelease(p,0.03,td,r(0.15,0.4)*lv); v.drop.frequency.exponentialRampToValueAtTime(p*0.8,td+0.04); }
+    // deep water: a gentle low round thump (100-150 Hz)
+    if(d>0.25){ const th=monoAt(v.thump,t0+0.005,0.3), p=r(115,150); v.thump.triggerAttackRelease(p,0.3,th,(d-0.2)*0.9*lv); v.thump.frequency.exponentialRampToValueAtTime(p*0.75,th+0.3); }
+  }; }
+let splashFx=null;
+function splashSound(depth,level){ if(!audioReady||!amb) return; if(!splashFx) splashFx=makeSplash(amb); splashFx(Tone.now()+0.02,depth,level); }
 function fxSound(kind){ if(!audioReady||!amb) return;
-  if(!fxSnd){ const bp=new Tone.Filter({type:'bandpass',frequency:3800,Q:0.8}).connect(amb), lp=new Tone.Filter({type:'lowpass',frequency:1100,Q:0.5}).connect(amb);
-    fxSnd={rustle:new Tone.NoiseSynth({noise:{type:'pink'},envelope:{attack:0.03,decay:0.4,sustain:0}}).connect(bp),splash:new Tone.NoiseSynth({noise:{type:'white'},envelope:{attack:0.002,decay:0.28,sustain:0}}).connect(lp)};
-    fxSnd.rustle.volume.value=-12; fxSnd.splash.volume.value=-10; }
+  if(!fxSnd){ const bp=new Tone.Filter({type:'bandpass',frequency:3800,Q:0.8}).connect(amb);
+    fxSnd={rustle:new Tone.NoiseSynth({noise:{type:'pink'},envelope:{attack:0.03,decay:0.4,sustain:0}}).connect(bp)}; fxSnd.rustle.volume.value=-12; }
   const s=fxSnd[kind]; s.triggerAttackRelease(0.05,monoAt(s,Tone.now()+0.01,0.05)); }
 const CYAN=C('#5ff4ff');
 function nightShimmer(x,y,z,n){ if(night<0.5) return; const f=islFx(); for(let k=0;k<n;k++){ const a=Math.random()*6.28, r=Math.random()*0.7; f.glow.add(x+Math.cos(a)*r,y+0.04,z+Math.sin(a)*r,0,0.15+Math.random()*0.2,0,0.9+Math.random()*0.8,CYAN,0); } }
 function waterTap(){ const x=tapPt.x, z=tapPt.z, f=islFx(), wc=C('#eafcff');
-  addRipple(x,z,1.2,night>0.5); isl.scare={x,z,t:T}; addVibe(1); fxSound('splash');
+  addRipple(x,z,1.2,night>0.5); isl.scare={x,z,t:T}; addVibe(1); splashSound(Math.max(0,-0.31-terrainH(x,z)));
   for(let k=0;k<16;k++){ const a=Math.random()*6.28, s=0.4+Math.random()*0.9; f.spray.add(x,-0.27,z,Math.cos(a)*s,1.8+Math.random()*2.2,Math.sin(a)*s,0.45+Math.random()*0.35,wc,9.8); }
   nightShimmer(x,-0.31,z,10); }
 function groundTap(){ const x=tapPt.x, y=tapPt.y, z=tapPt.z;
@@ -2244,7 +2280,7 @@ function dropCoconut(g){ let c=nuts.find(n=>n.life<=0);
   g.updateWorldMatrix(true,false); g.localToWorld(_nv.copy(g.userData.top)); c.m.position.copy(_nv); c.v.set((Math.random()-0.5)*1.4,0.4,(Math.random()-0.5)*1.4); c.life=6; c.wet=false; c.m.visible=true; c.m.scale.setScalar(1); }
 function updateNuts(dt){ nuts.forEach(c=>{ if(c.life<=0) return; c.life-=dt; const p=c.m.position, r=0.13, sea=-0.31;
   if(surfRaw(p.x,p.z)<sea-0.08&&p.y<=sea+0.02){
-    if(!c.wet){ c.wet=true; addRipple(p.x,p.z,0.6,night>0.5); fxSound('splash'); }
+    if(!c.wet){ c.wet=true; addRipple(p.x,p.z,0.6,night>0.5); splashSound(Math.max(0,-0.31-terrainH(p.x,p.z)),0.6); }
     p.y+=(sea+waveHjs(p.x,p.z,T)-0.03-p.y)*Math.min(1,dt*6); c.v.y=0; c.v.x*=1-dt*0.6; c.v.z*=1-dt*0.6; p.x+=c.v.x*dt; p.z+=c.v.z*dt;
   } else {
     c.v.y-=9.8*dt; p.addScaledVector(c.v,dt); const gy=surfRaw(p.x,p.z);
