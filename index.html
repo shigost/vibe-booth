@@ -35,6 +35,7 @@
 
 <div class="stats">
   <button class="glass camBtn" id="camCycle" aria-label="Change camera view">🎥</button>
+  <button class="glass moreBtn" id="moreBtn" aria-label="More controls: mixer, pads, Studio, Show, and Learn" aria-haspopup="dialog">☰</button>
   <button class="glass helpBtn" id="helpBtn" aria-label="How to play and camera views" aria-haspopup="dialog">?</button>
   <div class="stat" id="lvlChip"><span class="statLabel">Level</span><b id="lvlName">Bedroom DJ</b><div class="bar"><i id="xpFill"></i></div></div>
   <div class="stat" id="vibeChip"><span class="statLabel">Crowd</span><b><span id="vibeVal">0</span>% <span class="hypedWord">hyped</span></b><div class="bar vibe"><i id="vibeFill"></i></div></div>
@@ -49,35 +50,24 @@
 
 <button class="coachPill" id="coachPill"></button>
 
-<aside class="console" id="console">
+<aside class="console" id="console" aria-label="DJ controls">
   <button class="handle" id="handle" aria-label="Show more controls"><span></span></button>
-  <div class="perf">
-    <button class="dk" id="pA" data-deck="A" aria-label="Play Deck A"><span class="disc"><span class="mini"><i></i></span><span class="pp" aria-hidden="true"></span></span><span class="dkText"><span class="dkName">Deck A</span><span class="dkMeta">Tap to play</span></span></button>
-    <div class="xf"><div class="xfLab"><span>A</span><span>Crossfade</span><span>B</span></div><input type="range" id="xfader" min="0" max="1" step="0.01" value="0.5" aria-label="Crossfader"></div>
-    <button class="dk" id="pB" data-deck="B" aria-label="Play Deck B"><span class="disc"><span class="mini"><i></i></span><span class="pp" aria-hidden="true"></span></span><span class="dkText"><span class="dkName">Deck B</span><span class="dkMeta">Tap to play</span></span></button>
+  <!-- desktop: a controller dock (deck, mixer, deck) with the tabs and show buttons on a bar above it -->
+  <div class="dockBar" id="dockBar"><div class="dbL" id="dbL"></div><div class="dbR" id="dbR"></div></div>
+  <div class="rig" id="rig">
+    <div class="deckU A"><div class="slot" id="s-coreA"></div><div class="side" id="s-sideA"></div></div>
+    <div class="mixer" id="mixerDesk"><div class="strips" id="s-strips"></div><div class="mixLow" id="s-mixLow"></div></div>
+    <div class="deckU B"><div class="side" id="s-sideB"></div><div class="slot" id="s-coreB"></div></div>
   </div>
-  <div class="acts">
-    <button class="act build" id="aBuild">Build</button>
-    <button class="act drop" id="aDrop">Drop</button>
-    <button class="act fire" id="aFire">Flames</button>
-    <button class="act laser" id="aLaser">Lasers</button>
-  </div>
-  <nav class="tabs">
-    <button data-tab="mix" class="on">Mix</button>
-    <button data-tab="studio">Studio</button>
-    <button data-tab="show">Show</button>
-    <button data-tab="learn">Learn</button>
-  </nav>
-
+  <!-- phones held upright: the twin decks, crossfader, and show buttons sit on top of the sheet -->
+  <div class="sheetTop" id="sheetTop"><div class="twin" id="s-twin"></div><div id="s-sheetXf"></div><div id="s-sheetShow"></div><div id="s-sheetTabs"></div></div>
   <div class="tabBody" id="tab-mix">
-    <div class="chan" id="chanA"></div>
-    <div class="chan" id="chanB"></div>
-    <div class="master">
-      <div class="row"><label>Tempo</label><input type="range" id="tempo" min="80" max="180" step="1" value="124" aria-label="Master tempo"><span class="val" id="tempoVal">124</span></div>
-      <div class="quad"><button class="tog" id="fxEcho">Echo</button><button class="tog" id="fxVerb">Reverb</button><button class="tog" id="fxPhaser">Phaser</button><button class="tog" id="fxGate">Gate</button></div>
-      <div class="row" style="margin-top:8px"><label>Island</label><input type="range" id="ambVol" min="0" max="1" step="0.01" value="0.5" aria-label="Island ambience volume"></div>
+    <div class="mixBody">
+      <div class="mbTools" id="s-mbTools"></div>
+      <div class="mbTracks" id="s-mbTracks"></div>
+      <div class="mixer mbMixer"><div class="strips" id="s-mbStrips"></div><div class="mixLow" id="s-mbLow"></div></div>
+      <div class="mbPads" id="s-mbPads"></div>
     </div>
-    <p class="tip">Drag a knob up or down to turn it. Double-tap any knob to snap it back to the middle.</p>
   </div>
 
   <div class="tabBody" id="tab-studio" hidden>
@@ -118,6 +108,8 @@
     <div class="swatches" id="laserSwatches"></div>
     <div class="chips" id="laserModes" style="margin-top:8px"></div>
     <button class="holdBtn" id="sStrobe">Hold for strobe</button>
+    <h3>Island sounds</h3>
+    <div class="row"><label>Island</label><input type="range" id="ambVol" min="0" max="1" step="0.01" value="0.5" aria-label="Island ambience volume"></div>
     <div class="toggles">
       <label class="trow">Lasers follow the beat<input type="checkbox" id="tLaserAuto"></label>
       <label class="trow">Flames fire on every drop<input type="checkbox" id="tFlameAuto"></label>
@@ -148,6 +140,66 @@
     <div class="btnRow"><button class="btn" id="resetProgress">Reset quests and XP</button></div>
   </div>
 </aside>
+
+<!-- phones on their side: a deck under each thumb and a small mixer between them -->
+<div class="landDeck A" id="s-landA"></div>
+<div class="landDeck B" id="s-landB"></div>
+<div class="landCenter" id="s-landCenter"><div class="lcRow"><div id="s-lcFA"></div><div class="lcShow" id="s-lcShow"></div><div id="s-lcFB"></div></div><div id="s-lcXf"></div></div>
+<!-- Studio, Show, and Learn (and the full mixer on phones on their side) open in this panel -->
+<div class="panelWin" id="panelWin" role="dialog" aria-modal="false" aria-labelledby="pwTitle" hidden>
+  <div class="pwHead"><span class="pwTitle" id="pwTitle">Mix</span><div class="pwTabs" id="s-pwTabs"></div><button class="pwClose" id="pwClose" type="button" aria-label="Close panel">✕</button></div>
+  <div class="pwBody" id="s-pwBodies"></div>
+</div>
+<button class="dockRestore" id="dockRestore" type="button" hidden>▲ Show the decks</button>
+
+<!-- the controls themselves; layoutControls() moves each into the right slot for the screen shape -->
+<div id="parts" hidden>
+  <div class="core A" id="coreA" data-deck="A">
+    <div class="deckHead"><span class="tag">A</span><span class="dkText"><span class="dkName">Deck A</span><span class="dkMeta">Tap to play</span></span></div>
+    <div class="platter" role="button" tabindex="0" aria-label="Play Deck A" data-tip="This is Deck A. Tap the record to start or stop its track."><div class="vinyl"><div class="plabel"></div><div class="marker"></div></div><span class="pp" aria-hidden="true"></span></div>
+    <button class="playBtn" id="pA" type="button" aria-label="Play Deck A" data-tip="Starts or stops Deck A. It waits for the next bar so it always lands on the beat."><i aria-hidden="true"></i><span class="pbTxt">Play</span></button>
+  </div>
+  <div class="core B" id="coreB" data-deck="B">
+    <div class="deckHead"><span class="tag">B</span><span class="dkText"><span class="dkName">Deck B</span><span class="dkMeta">Tap to play</span></span></div>
+    <div class="platter" role="button" tabindex="0" aria-label="Play Deck B" data-tip="This is Deck B. Tap the record to start or stop its track."><div class="vinyl"><div class="plabel"></div><div class="marker"></div></div><span class="pp" aria-hidden="true"></span></div>
+    <button class="playBtn" id="pB" type="button" aria-label="Play Deck B" data-tip="Starts or stops Deck B. It waits for the next bar so it always lands on the beat."><i aria-hidden="true"></i><span class="pbTxt">Play</span></button>
+  </div>
+  <div class="trackPick" id="selA"></div>
+  <div class="trackPick" id="selB"></div>
+  <div class="pads A" id="padsA" data-lockgroup></div>
+  <div class="pads B" id="padsB" data-lockgroup></div>
+  <div class="knobs2 A" id="knobsA" data-lockgroup></div>
+  <div class="knobs2 B" id="knobsB" data-lockgroup></div>
+  <div class="faderU A" id="faderA"></div>
+  <div class="faderU B" id="faderB"></div>
+  <div class="xfU" id="xfU" data-tip="Slide toward A or B to choose which deck the crowd hears. In the middle, you hear both."><div class="xLab"><span>A</span><span>Crossfader</span><span>B</span></div><input type="range" id="xfader" min="0" max="1" step="0.01" value="0.5" aria-label="Crossfader"></div>
+  <div class="fxU" id="fxU" data-lockgroup><p class="secLab">Effects</p><div class="fxPads">
+    <button class="tog pad" id="fxEcho" data-unlock="echo" data-tip="Adds echoes that ring out after each sound.">Echo</button>
+    <button class="tog pad" id="fxVerb" data-unlock="echo" data-tip="Adds a big hall around the music.">Reverb</button>
+    <button class="tog pad" id="fxPhaser" data-unlock="echo" data-tip="Adds a swirly, whooshing sweep.">Phaser</button>
+    <button class="tog pad" id="fxGate" data-unlock="echo" data-tip="Chops the sound on and off in rhythm.">Gate</button>
+  </div></div>
+  <div class="tempoU" id="tempoU" data-unlock="blend" data-tip="Sets the speed of both decks in beats per minute."><div class="row"><label>Tempo</label><input type="range" id="tempo" min="80" max="180" step="1" value="124" aria-label="Master tempo"><span class="val" id="tempoVal">124</span></div></div>
+  <div class="acts" id="showRow">
+    <button class="act build" id="aBuild" data-unlock="build" data-tip="Starts a 2-bar build-up, then the music drops.">Build</button>
+    <button class="act drop" id="aDrop" data-tip="Drops the beat right now for a big moment.">Drop</button>
+    <button class="act fire" id="aFire" data-unlock="lights" data-tip="Fires the flame cannons on stage.">Flames</button>
+    <button class="act laser" id="aLaser" data-unlock="lights" data-tip="Sends a burst of lasers over the crowd.">Lasers</button>
+  </div>
+  <nav class="tabs" id="tabsNav" aria-label="Panels">
+    <button data-tab="mix" class="on">Mix</button>
+    <button data-tab="studio">Studio</button>
+    <button data-tab="show">Show</button>
+    <button data-tab="learn">Learn</button>
+  </nav>
+  <div class="dockTools" id="dockTools">
+    <label class="allTog" data-tip="Shows every control now, instead of unlocking them as you finish quests."><input type="checkbox" id="allCtl"><i aria-hidden="true"></i><span>Show all controls</span></label>
+    <div class="sizeSeg" role="group" aria-label="Deck size" data-tip="Full shows everything, Compact keeps just the essentials, and Hide tucks the decks away.">
+      <button type="button" data-size="full">Full</button><button type="button" data-size="compact">Compact</button><button type="button" data-size="hidden">Hide</button>
+    </div>
+  </div>
+  <p class="lockNote" id="lockNote">🔒 Pads, EQ, and effects unlock as you finish quests.</p>
+</div>
 
 <div class="helpSheet" id="helpSheet" role="dialog" aria-modal="true" aria-labelledby="helpTitle" hidden>
   <div class="helpCard">

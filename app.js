@@ -117,15 +117,15 @@ const MISSIONS=[
   {id:'save',xp:100,title:'Make it yours',how:'Name your track in Studio and tap Save to crate. Now it loads on either deck.',target:'#saveTrack',tab:'studio'},
   {id:'prep',xp:100,title:'Cue it up',how:'With Deck A playing, slide the crossfader all the way to A, then tap Deck B. The crowd cannot hear B yet, so you can prep it.',target:'#pB'},
   {id:'blend',xp:125,title:'The full transition',how:'With both decks playing, slide the crossfader from one side all the way to the other.',target:'#xfader'},
-  {id:'bassSwap',xp:200,title:'Bass swap',how:'In Mix, cut Low on the incoming deck, blend it in, then cut Low on the old deck and bring Low back on the new one.',target:'#chanB .kill',tab:'mix'},
-  {id:'filter',xp:100,title:'Filter sweep',how:'In Mix, drag a Filter knob far up or down, then double-tap it back to the middle.',target:'#chanA .knob[data-k=filter]',tab:'mix'},
+  {id:'bassSwap',xp:200,title:'Bass swap',how:'In Mix, cut Low on the incoming deck, blend it in, then cut Low on the old deck and bring Low back on the new one.',target:'#knobsB .kill',tab:'mix'},
+  {id:'filter',xp:100,title:'Filter sweep',how:'In Mix, drag a Filter knob far up or down, then double-tap it back to the middle.',target:'#knobsA .knob[data-k=filter]',tab:'mix'},
   {id:'build',xp:150,title:'Build and drop',how:'Tap Build. A riser and snare roll play for 2 bars, the music pauses for one beat, then it drops.',target:'#aBuild'},
   {id:'lights',xp:100,title:'Flames on the drop',how:'Tap Flames (or a flame cannon on stage) within 2 seconds after a drop lands.',target:'#aFire'},
   {id:'paint',xp:75,title:'VJ mode',how:'In Show, pick a different visual for the round screen and type your own text.',target:'#patternChips',tab:'show'},
   {id:'echo',xp:100,title:'Echo out',how:'In Mix, turn on Echo, then stop a deck. The tail rings out like a pro exit.',target:'#fxEcho',tab:'mix'},
-  {id:'hotcue',xp:100,title:'Hot cue',how:'In Mix, tap Drop under a deck to jump straight to its drop on the next bar.',target:'#chanA .cue[data-s=Drop]',tab:'mix'},
-  {id:'loop',xp:100,title:'Loop it',how:'Tap Loop 4 on a playing deck to repeat the current 4 bars. Tap it again to let the track move on.',target:'#chanA .loopBtn',tab:'mix'},
-  {id:'roll',xp:100,title:'Beat roll',how:'Press and hold Roll on a playing deck for a stuttering repeat, then let go to fall back in.',target:'#chanA .rollBtn',tab:'mix'},
+  {id:'hotcue',xp:100,title:'Hot cue',how:'In Mix, tap Drop under a deck to jump straight to its drop on the next bar.',target:'#padsA .cue[data-s=Drop]',tab:'mix'},
+  {id:'loop',xp:100,title:'Loop it',how:'Tap Loop 4 on a playing deck to repeat the current 4 bars. Tap it again to let the track move on.',target:'#padsA .loopBtn',tab:'mix'},
+  {id:'roll',xp:100,title:'Beat roll',how:'Press and hold Roll on a playing deck for a stuttering repeat, then let go to fall back in.',target:'#padsA .rollBtn',tab:'mix'},
   {id:'crowd',xp:250,title:'Rock the crowd',how:'Get the crowd above 80% hyped. Drops, smooth transitions, and pyro all help.',target:'#vibeChip'}
 ];
 const LEVELS=[[0,'Bedroom DJ'],[150,'Warm-up Act'],[400,'Club Resident'],[750,'Tour Support'],[1150,'Festival Headliner'],[1800,'Mainstage Legend']];
@@ -179,15 +179,24 @@ function renderMissions(){
   else { q.append(el('span','cpDot','★')); txt.append(el('span','cpTitle','Every quest done'),el('span','cpHow','Freestyle time. Shigost is proud of you.')); }
   q.append(txt);
   $('#doneCount').textContent=Object.keys(progress.done).length+' of '+MISSIONS.length+' done';
-  updateHeader(); applyCoach();
+  updateHeader(); refreshLocks(); applyCoach();
 }
 let curTab='mix';
-const sheetOpen=()=>!isMobile()||$('#console').classList.contains('open');
+function tabVisible(tab){ const m=layoutModeNow(), pw=!$('#panelWin').hidden;
+  if(m==='sheet') return curTab===tab&&$('#console').classList.contains('open');
+  if(m==='desk') return tab==='mix'||(curTab===tab&&pw);
+  return curTab===tab&&pw; }
+const shown=e=>!!e&&e.getClientRects().length>0;
+function revealer(tab){ const m=layoutModeNow(), tb=$('.tabs button[data-tab='+tab+']');
+  if(m==='desk'){ if(document.body.classList.contains('dock-hidden')) return $('#dockRestore'); if(tab==='mix') return $('.sizeSeg [data-size=full]'); return tb; }
+  if(m==='land') return $('#panelWin').hidden?$('#moreBtn'):tb;
+  return tb; }
 function applyCoach(){
   $$('.coach').forEach(e=>e.classList.remove('coach'));
   const m=MISSIONS.find(x=>!progress.done[x.id]); if(!m) return;
   let t=$(m.target);
-  if(m.tab&&!(curTab===m.tab&&sheetOpen())) t=$('.tabs button[data-tab='+m.tab+']');
+  if(m.tab&&!tabVisible(m.tab)) t=revealer(m.tab);
+  else if(!shown(t)) t=revealer(m.tab||'mix');
   if(t) t.classList.add('coach');
 }
 
@@ -425,10 +434,10 @@ class Deck{
   }
   stop(){ this.playing=false; this.pending=false; this.loop=null; this.roll=null; this.jump=null; this.rel.forEach(f=>f()); this.arrGain.gain.cancelScheduledValues(0); this.arrGain.gain.value=1; [this.arrHP,this.revHP].forEach(f=>{ f.frequency.cancelScheduledValues(0); f.frequency.value=10; }); [this.arrLP,this.revLP].forEach(f=>{ f.frequency.cancelScheduledValues(0); f.frequency.value=20000; }); }
 }
-function deckMeta(d,sec,sb){ if(!d.playing) return; const pill=$('#p'+d.id); pill.querySelector('.dkMeta').textContent=sec.n+', bar '+(sb+1)+' of '+sec.bars+(d.loop?' (looping)':''); }
+function deckMeta(d,sec,sb){ if(!d.playing) return; const pill=$('#core'+d.id); pill.querySelector('.dkMeta').textContent=sec.n+', bar '+(sb+1)+' of '+sec.bars+(d.loop?' (looping)':''); }
 function sectionChanged(d,sec){
   d.sec=sec;
-  $$('#chan'+d.id+' .cue').forEach(b=>b.classList.toggle('now',b.dataset.s===sec.n));
+  $$('#pads'+d.id+' .cue').forEach(b=>b.classList.toggle('now',b.dataset.s===sec.n));
   if(!d.audible()) return;
   if(sec.build) buildHype=true;
   if(sec.drop){ isl.erupt=Math.max(isl.erupt||0,1.4); buildHype=false; laserBurst=Math.max(laserBurst,5); if(show.flameAuto) fireFlames(false); crowdCheer=1; squish(1.2); addVibe(8); beatPulse=1; if(typeof sgMove==='function') sgMove('jump'); }
@@ -496,10 +505,11 @@ function setBPM(b){
 function togglePlay(d){
   if(!audioReady) return;
   if(!d.track){ toast('Pick a track for this deck first','warn'); return; }
-  if(d.playing||d.pending){ d.stop(); deckUI(d); $('#chan'+d.id+' .loopBtn').classList.remove('on'); $$('#chan'+d.id+' .cue').forEach(b=>b.classList.remove('now')); if(echoOn) complete('echo'); return; }
+  if(d.playing||d.pending){ d.resumeBar=d.playing?Math.floor(Math.max(0,d.pos-1)/64)*4:(d.resumeBar||0); d.stop(); deckUI(d); $('#pads'+d.id+' .loopBtn').classList.remove('on'); $$('#pads'+d.id+' .cue').forEach(b=>b.classList.remove('now')); if(echoOn) complete('echo'); return; }
   const o=otherDeck(d);
   if(!(o.playing||o.pending)) setBPM(d.track.bpm);
   if(Tone.getTransport().state!=='started'){ globalStep=0; Tone.getTransport().start('+0.06'); }
+  if(!d.startBar&&d.resumeBar) d.startBar=d.resumeBar; d.resumeBar=0;
   d.pending=true; deckUI(d); markPlayed();
   complete('play');
   if(o.playing&&(o.id==='A'?xfVal<0.12:xfVal>0.88)) complete('prep');
@@ -512,27 +522,27 @@ function getTrack(val){
 }
 const STYLE_ART={'Island house':['#ffb23a','#2fbf96'],'Island tech':['#ff6a2a','#3fb2ea'],Garage:['#ffb3a7','#a98bff'],'Melodic house':['#ff9fd0','#ffd84d'],Riddim:['#2fbf96','#8f6bff'],'Alt pop':['#ffd84d','#3fb2ea'],'Future bass':['#ff9fd0','#a98bff'],House:['#ff9a3d','#ff5fa2'],Techno:['#5a4a80','#3fb2ea'],'Future Bass':['#ff9fd0','#a98bff'],Trance:['#3fb2ea','#a98bff'],'Tech House':['#ffd84d','#ff5fa2'],'Drum & Bass':['#2fbf96','#3fb2ea']};
 function loadTrackToDeck(d,val){
-  d.trackVal=val; d.track=getTrack(val); if(d.track) d.prepare(d.track);
-  const sel=$('#chan'+d.id+' .trackSel'); if(sel) sel.value=val;
+  d.trackVal=val; d.track=getTrack(val); d.resumeBar=0; if(d.track) d.prepare(d.track);
+  const sel=$('#sel'+d.id+' .trackSel'); if(sel) sel.value=val;
   refreshDeckInfo(d);
   if(d.playing&&!otherDeck(d).playing) setBPM(d.track.bpm);
 }
 function refreshDeckInfo(d){
   if(!d.track) return;
-  const t=d.track, pill=$('#p'+d.id);
+  const t=d.track, pill=$('#core'+d.id);
   pill.querySelector('.dkName').textContent=t.name;
   pill.querySelector('.dkMeta').textContent=d.playing?t.style+', '+t.bpm+' bpm':'Tap to play';
   const a=STYLE_ART[t.style]||['#ff5fa2','#ffd84d'];
-  pill.querySelector('.mini i').style.setProperty('--art','linear-gradient(135deg,'+a[0]+','+a[1]+')');
+  pill.querySelector('.plabel').style.setProperty('--art','linear-gradient(135deg,'+a[0]+','+a[1]+')');
 }
 function hotCue(id,name){ if(!audioReady) return; const d=decks[id]; if(!d.track) return;
   if(d.playing){ d.jump=CUES[name]; toast('Deck '+id+': jumping to '+name+' on the next bar'); }
   else { d.startBar=CUES[name]; if(!d.pending) togglePlay(d); }
   complete('hotcue'); }
-function toggleLoop(id){ if(!audioReady) return; const d=decks[id]; const b=$('#chan'+id+' .loopBtn');
+function toggleLoop(id){ if(!audioReady) return; const d=decks[id]; const b=$('#pads'+id+' .loopBtn');
   if(d.loop){ d.loop=null; b.classList.remove('on'); return; }
   const bar=Math.floor(Math.max(0,d.pos-1)/16); d.loop={start:Math.floor(bar/4)*4,len:4}; b.classList.add('on'); if(d.playing) complete('loop'); }
-function rollOn(id,on){ if(!audioReady) return; const d=decks[id]; const b=$('#chan'+id+' .rollBtn');
+function rollOn(id,on){ if(!audioReady) return; const d=decks[id]; const b=$('#pads'+id+' .rollBtn');
   if(on&&d.playing){ d.roll={len:2,i:0,start:null}; b.classList.add('on'); complete('roll'); } else { d.roll=null; b.classList.remove('on'); } }
 /* Getting beginners to press play: a play/pause icon on each deck, a glow ring on Deck A until the first play (and again
    after 30 quiet seconds), a "Start the music" button right after entering, and a "Tap to play" bubble over the 3D decks. */
@@ -542,7 +552,7 @@ function updatePlayNudge(){ if(!decks.A) return;
   const busy=decks.A.playing||decks.A.pending||decks.B.playing||decks.B.pending, now=performance.now();
   if(busy) silentSince=now;
   const nudge=!busy&&!startEl&&(!everPlayed||now-silentSince>30000);
-  const p=$('#pA'); p.classList.toggle('nudge',nudge); p.classList.toggle('soft',!!show.reduceFlash); }
+  const p=$('#coreA'); p.classList.toggle('nudge',nudge); p.classList.toggle('soft',!!show.reduceFlash); }
 let startEl=null;
 function showStartMusic(){ if(everPlayed||startEl) return;
   startEl=document.createElement('div'); startEl.className='startMusic';
@@ -564,10 +574,11 @@ function updateDeckBubble(){
     if(show_) deckBubble.style.transform='translate('+x.toFixed(1)+'px,'+y.toFixed(1)+'px) translate(-50%,-100%)'; }
   deckBubble.style.display=show_?'block':'none'; }
 function deckUI(d){
-  const pill=$('#p'+d.id);
-  pill.classList.toggle('live',d.playing); pill.classList.toggle('cued',d.pending);
-  pill.setAttribute('aria-label',(d.playing||d.pending?'Stop':'Play')+' Deck '+d.id);
-  if(d.pending) pill.querySelector('.dkMeta').textContent='Starting on the next bar';
+  const c=$('#core'+d.id), pb=$('#p'+d.id), lab=(d.playing||d.pending?'Pause':'Play')+' Deck '+d.id;
+  c.classList.toggle('live',d.playing); c.classList.toggle('cued',d.pending);
+  pb.setAttribute('aria-label',lab); c.querySelector('.platter').setAttribute('aria-label',lab);
+  pb.querySelector('.pbTxt').textContent=d.playing?'Pause':d.pending?'Starting':'Play';
+  if(d.pending) c.querySelector('.dkMeta').textContent='Starting on the next bar';
   else refreshDeckInfo(d);
 }
 function setEQ(d,band,db){
@@ -575,7 +586,7 @@ function setEQ(d,band,db){
   d.eq[band].rampTo(db<=-29?-60:db,0.03);
   if(band==='low'){
     d.lowVal=db;
-    $('#chan'+d.id+' .kill').classList.toggle('on',db<=-29);
+    $('#knobs'+d.id+' .kill').classList.toggle('on',db<=-29);
     if(db<=-20) d.wasCut=true;
     const o=otherDeck(d);
     if(db>=-3&&d.wasCut&&o.lowVal<=-20&&d.playing&&o.playing){ d.wasCut=false; complete('bassSwap'); addVibe(10); toast('Clean bass swap. One bassline at a time.','good'); }
@@ -2000,10 +2011,11 @@ const cam={tx:0,ty:1.2,tz:-3,r:62,theta:0.6,phi:1.0,fov:30};
 const camT=Object.assign({},cam);
 const PRESETS={island:{tx:0,ty:1.2,tz:-3,r:62,theta:0.6,phi:1.0,fov:30},front:{tx:0,ty:3.3,tz:-3.6,r:12,theta:0.2,phi:1.46,fov:46},dj:{tx:-1.4,ty:1.2,tz:4.0,r:11.19,theta:3.112,phi:1.147,fov:52},reef:{tx:0,ty:-1.6,tz:13,r:4.5,theta:0,phi:1.42,fov:55}};
 const view={w:1,h:1,c:0,s:0,cT:0,sT:0};
-function updateViewTargets(){
-  if(isMobile()){ view.cT=0; view.sT=$('#console').offsetHeight*0.92; }
-  else { view.cT=Math.max(0,window.innerWidth-$('#console').getBoundingClientRect().left); view.sT=0; }
-  document.documentElement.style.setProperty('--sheetH',(isMobile()?$('#console').offsetHeight:0)+'px');
+function updateViewTargets(){ const m=layoutMode||layoutModeNow(); let occ=0;
+  if(m==='desk'){ if(!document.body.classList.contains('dock-hidden')){ const r=$('#console').getBoundingClientRect(), b=$('#dockBar').getBoundingClientRect(); occ=Math.max(0,window.innerHeight-Math.min(r.top,b.height?b.top:r.top))+8; } view.cT=0; view.sT=occ*0.9; }
+  else if(m==='sheet'){ occ=$('#console').offsetHeight; view.cT=0; view.sT=occ*0.92; }
+  else { occ=$('#s-landCenter').offsetHeight+12; view.cT=0; view.sT=occ*0.5; }
+  document.documentElement.style.setProperty('--sheetH',occ+'px');
 }
 // first-person POV from Shigost's eyes ("Shigost's view"); PRESETS.dj is the fallback if her model fails to load
 const pov={on:false,yaw:0,pitch:0,fov:55,fovT:55,idle:0,enter:0,had:false,selfHide:0,pos:new THREE.Vector3(),q:new THREE.Quaternion(),anchor:new THREE.Vector3()};
@@ -2530,6 +2542,7 @@ function frame(now){
   if(uiT>0.1) guarded('ui',()=>{ uiT=0; if(amb){ const al=ambLevel*(anyPlaying()?0.45:1); amb.gain.rampTo(al,0.4); if(ambVerb) ambVerb.gain.rampTo(al*0.8,0.4); }
     // the muffle only follows a valid underwater reading; anything else leaves the music fully open
     updatePlayNudge();
+    updateMeters();
     if(uwLP){ const k=Number.isFinite(uwK)?clamp(uwK,0,1):0; uwLP.frequency.rampTo(20000*Math.pow(650/20000,k),0.25); }
     $('#vibeFill').style.width=vibe+'%'; $('#vibeVal').textContent=Math.round(vibe);
     const rs=document.documentElement.style;
@@ -2573,28 +2586,45 @@ class Knob{
 /* ================= UI BUILD ================= */
 const knobs={A:{},B:{}};
 const eqDb=p=>p<0?p*30:p*6;
+const PAD_TIPS={Intro:'Jumps to the start of the track on the next bar.',Build:'Jumps to the build-up, where the tension rises.',Drop:'Jumps straight to the drop, the biggest part.',Break:'Jumps to the calm breakdown.'};
+const meterEls={};
 function buildChannels(){
   ['A','B'].forEach(id=>{
-    const ch=$('#chan'+id); ch.innerHTML='';
-    const head=el('div','chanHead'); head.append(el('span','chanTag',id));
-    const sel=el('select','trackSel'); sel.dataset.deck=id; sel.setAttribute('aria-label','Track on deck '+id); head.append(sel); ch.append(head);
+    const dn='Deck '+id;
+    // track picker
+    const pick=$('#sel'+id); pick.innerHTML='';
+    const sel=el('select','trackSel'); sel.dataset.deck=id; sel.setAttribute('aria-label','Track on '+dn); sel.dataset.tip='Pick which track '+dn+' plays.'; pick.append(sel);
     sel.addEventListener('change',e=>{ if(audioReady) loadTrackToDeck(decks[id],e.target.value); });
-    const row=el('div','knobs'); ch.append(row);
-    [['high','Hi'],['mid','Mid'],['low','Low']].forEach(([band,lab])=>{ knobs[id][band]=new Knob(row,{key:band,label:lab,aria:lab+' EQ, deck '+id,onChange:p=>{ if(decks[id]) setEQ(decks[id],band,eqDb(p)); }}); });
-    knobs[id].filter=new Knob(row,{key:'filter',label:'Filter',aria:'Filter, deck '+id,onChange:p=>{ if(decks[id]) setFilter(decks[id],p); }});
-    const kill=el('button','kill','Cut low'); kill.setAttribute('aria-label','Cut low on deck '+id); row.append(kill);
-    kill.addEventListener('click',()=>{ const d=decks[id]; if(!d) return; const k=knobs[id].low; k.set(d.lowVal<=-29?0:-1); });
-    const foot=el('div','chanFoot'); const lb=el('label',null,'Volume'); const vol=el('input'); vol.type='range'; vol.min=0; vol.max=1; vol.step=0.01; vol.value=0.8; vol.setAttribute('aria-label','Volume deck '+id);
-    vol.addEventListener('input',()=>{ const d=decks[id]; if(d){ d.fader.gain.rampTo(+vol.value,0.03); d.revFader.gain.rampTo(+vol.value,0.03); } });
-    foot.append(lb,vol); ch.append(foot);
-    const cr=el('div','cueRow');
-    ['Intro','Build','Drop','Break'].forEach(n=>{ const b=el('button','cue',n); b.dataset.s=n; b.setAttribute('aria-label','Hot cue '+n+' on deck '+id); b.addEventListener('click',()=>hotCue(id,n)); cr.append(b); });
-    const lb2=el('button','loopBtn','Loop 4'); lb2.addEventListener('click',()=>toggleLoop(id)); const rb=el('button','rollBtn','Roll');
+    // performance pads
+    const pads=$('#pads'+id); pads.innerHTML=''; pads.append(el('p','secLab',dn+' pads')); const pg=el('div','padGrid'); pads.append(pg);
+    ['Intro','Build','Drop','Break'].forEach(n=>{ const b=el('button','pad cue',n); b.type='button'; b.dataset.s=n; b.dataset.unlock='hotcue'; b.dataset.tip=PAD_TIPS[n]; b.setAttribute('aria-label',n+' on '+dn); b.addEventListener('click',()=>hotCue(id,n)); pg.append(b); });
+    const lb=el('button','pad loopBtn','Loop 4'); lb.type='button'; lb.dataset.unlock='loop'; lb.dataset.tip='Repeats the current 4 bars until you tap it again.'; lb.setAttribute('aria-label','Loop 4 bars on '+dn); lb.addEventListener('click',()=>toggleLoop(id));
+    const rb=el('button','pad rollBtn','Roll'); rb.type='button'; rb.dataset.unlock='roll'; rb.dataset.tip='Hold for a stuttering repeat, then let go to fall back in.'; rb.setAttribute('aria-label','Roll on '+dn+' (hold)');
     rb.addEventListener('pointerdown',e=>{ e.preventDefault(); rollOn(id,true); }); ['pointerup','pointerleave','pointercancel'].forEach(ev=>rb.addEventListener(ev,()=>rollOn(id,false)));
-    cr.append(lb2,rb); ch.append(cr);
+    pg.append(lb,rb);
+    // EQ and filter knobs, plus Cut low
+    const kn=$('#knobs'+id); kn.innerHTML=''; kn.append(el('span','chName',id));
+    const KT={high:'Turns the sparkly highs (hats and cymbals) up or down.',mid:'Turns the vocals and chords up or down.',low:"Turns the bass and kick up or down. Cut it to make room for the other deck's bass."};
+    [['high','Hi'],['mid','Mid'],['low','Low']].forEach(([band,lab])=>{ knobs[id][band]=new Knob(kn,{key:band,label:lab,aria:lab+' EQ, '+dn,onChange:p=>{ if(decks[id]) setEQ(decks[id],band,eqDb(p)); }});
+      knobs[id][band].el.dataset.unlock='bassSwap'; knobs[id][band].el.dataset.tip=KT[band]; });
+    knobs[id].filter=new Knob(kn,{key:'filter',label:'Filter',aria:'Filter, '+dn,onChange:p=>{ if(decks[id]) setFilter(decks[id],p); }});
+    knobs[id].filter.el.dataset.unlock='filter'; knobs[id].filter.el.dataset.tip='Left muffles the track, right thins it out. Back to the middle sounds normal.';
+    const kill=el('button','kill','Cut low'); kill.type='button'; kill.dataset.unlock='bassSwap'; kill.dataset.tip="Removes this deck's bass in one tap. Handy for a clean bass swap."; kill.setAttribute('aria-label','Cut low on '+dn); kn.append(kill);
+    kill.addEventListener('click',()=>{ const d=decks[id]; if(!d) return; const k=knobs[id].low; k.set(d.lowVal<=-29?0:-1); });
+    // volume fader with an LED level meter
+    const fu=$('#faderU'.replace('faderU','fader'+id)); fu.innerHTML='';
+    const meter=el('div','meter'); meter.setAttribute('aria-hidden','true'); meterEls[id]=[...Array(10)].map((_,i)=>{ const sq=el('s',i>=8?'r':i>=6?'y':null); meter.append(sq); return sq; });
+    const vf=el('div','vfader'); vf.dataset.tip=dn+"'s volume. Slide up for louder.";
+    const vol=el('input'); vol.type='range'; vol.min=0; vol.max=1; vol.step=0.01; vol.value=0.8; vol.setAttribute('aria-label','Volume '+dn); vol.setAttribute('aria-orientation','vertical'); vf.append(vol);
+    vol.addEventListener('input',()=>{ const d=decks[id]; if(d){ d.fader.gain.rampTo(+vol.value,0.03); d.revFader.gain.rampTo(+vol.value,0.03); } });
+    fu.append(meter,vf,el('span','fLab','Volume'));
   });
   refreshSelects();
 }
+// LED meters follow each deck's level a few times a second
+function updateMeters(){ ['A','B'].forEach(id=>{ const d=decks[id], m=meterEls[id]; if(!m) return; let lit=0;
+  if(d&&d.meter&&d.playing){ const v=d.meter.getValue(), db=Array.isArray(v)?Math.max(...v):v; if(Number.isFinite(db)) lit=clamp(Math.round((db+42)/40*10),0,10); }
+  m.forEach((sq,i)=>sq.classList.toggle('l',i<lit)); }); }
 function refreshSelects(){
   $$('.trackSel').forEach(sel=>{
     const id=sel.dataset.deck, d=decks[id];
@@ -2661,7 +2691,7 @@ function buildStudio(){
   $('#kitSel').addEventListener('change',e=>{myTrack.kit=e.target.value; if(audioReady) ['A','B'].forEach(id=>{ if(decks[id].trackVal==='my') decks[id].prepare(myTrack); }); myChanged();});
   $('#trackSwing').addEventListener('input',e=>{myTrack.swing=+e.target.value; $('#trackSwingVal').textContent=Math.round(myTrack.swing*100)+'%'; myChanged();});
   $('#trackBpm').addEventListener('input',e=>{myTrack.bpm=+e.target.value;$('#trackBpmVal').textContent=myTrack.bpm;myChanged();});
-  const playOn=id=>{ if(!audioReady) return; const d=decks[id]; loadTrackToDeck(d,'my'); d.loop={start:CUES.Drop,len:4}; $('#chan'+id+' .loopBtn').classList.add('on'); if(d.playing) d.jump=CUES.Drop; else { d.startBar=CUES.Drop; if(!d.pending) togglePlay(d); } toast('Looping the drop of your track so you can hear edits'); };
+  const playOn=id=>{ if(!audioReady) return; const d=decks[id]; loadTrackToDeck(d,'my'); d.loop={start:CUES.Drop,len:4}; $('#pads'+id+' .loopBtn').classList.add('on'); if(d.playing) d.jump=CUES.Drop; else { d.startBar=CUES.Drop; if(!d.pending) togglePlay(d); } toast('Looping the drop of your track so you can hear edits'); };
   $('#playOnA').addEventListener('click',()=>playOn('A'));
   $('#playOnB').addEventListener('click',()=>playOn('B'));
   $('#inspire').addEventListener('click',()=>{
@@ -2705,10 +2735,71 @@ function buildShow(){
   ['pointerup','pointerleave','pointercancel'].forEach(ev=>sb.addEventListener(ev,()=>{strobeHold=false;}));
 }
 function checkPaint(){ if(show.paintPattern&&show.paintText) complete('paint'); }
+/* ---------- Mix layout ----------
+   desk: a controller dock along the bottom (deck, mixer, deck) with tabs and show buttons on a bar above it; Studio, Show,
+         and Learn open in a panel. sheet (phones upright, folded phones): twin decks on top of the bottom sheet, the mixer
+         and pads in the Mix tab. land (phones on their side): a deck under each thumb, faders and show buttons between,
+         everything else in a panel behind the More button. */
+const SHEET_Q='(max-width:820px) and (orientation:portrait), (max-width:820px) and (min-height:501px)', LAND_Q='(orientation:landscape) and (max-height:500px)';
+const layoutModeNow=()=>matchMedia(SHEET_Q).matches?'sheet':matchMedia(LAND_Q).matches?'land':'desk';
+const MIXBODY=[['dockTools','s-mbTools'],['lockNote','s-mbTools'],['selA','s-mbTracks'],['selB','s-mbTracks'],['knobsA','s-mbStrips']];
+const LAYOUT={
+  desk:[['coreA','s-coreA'],['coreB','s-coreB'],['selA','s-sideA'],['padsA','s-sideA'],['lockNote','s-sideA'],['selB','s-sideB'],['padsB','s-sideB'],
+    ['knobsA','s-strips'],['faderA','s-strips'],['faderB','s-strips'],['knobsB','s-strips'],['xfU','s-mixLow'],['fxU','s-mixLow'],['tempoU','s-mixLow'],
+    ['tabsNav','dbL'],['dockTools','dbR'],['showRow','dbR'],['BODIES','s-pwBodies']],
+  sheet:[['coreA','s-twin'],['coreB','s-twin'],['xfU','s-sheetXf'],['showRow','s-sheetShow'],['tabsNav','s-sheetTabs'],...MIXBODY,
+    ['faderA','s-mbStrips'],['faderB','s-mbStrips'],['knobsB','s-mbStrips'],['fxU','s-mbLow'],['tempoU','s-mbLow'],['padsA','s-mbPads'],['padsB','s-mbPads'],['BODIES','console']],
+  land:[['coreA','s-landA'],['coreB','s-landB'],['faderA','s-lcFA'],['showRow','s-lcShow'],['faderB','s-lcFB'],['xfU','s-lcXf'],['tabsNav','s-pwTabs'],...MIXBODY,
+    ['knobsB','s-mbStrips'],['fxU','s-mbLow'],['tempoU','s-mbLow'],['padsA','s-mbPads'],['padsB','s-mbPads'],['BODIES','s-pwBodies']]};
+let layoutMode=null;
+function layoutControls(){ const m=layoutModeNow(); if(m===layoutMode) return; const had=!!layoutMode; layoutMode=m;
+  document.body.classList.remove('mode-desk','mode-sheet','mode-land'); document.body.classList.add('mode-'+m);
+  LAYOUT[m].forEach(([p,slot])=>{ const host=slot==='console'?$('#console'):$('#'+slot);
+    (p==='BODIES'?['tab-mix','tab-studio','tab-show','tab-learn']:[p]).forEach(id=>host.append($('#'+id))); });
+  if(had){ closePanel(); setSheet(false); setTab('mix'); }
+  applyDockSize(); requestAnimationFrame(()=>{ updateViewTargets(); applyCoach(); }); }
+// desktop dock size: Full, Compact (platters, Play, crossfader, and Drop), or Hidden. New players start on Compact.
+let dockSize=store.get('dock','compact');
+function applyDockSize(){ const b=document.body; ['full','compact','hidden'].forEach(k=>b.classList.toggle('dock-'+k,dockSize===k));
+  $$('.sizeSeg button').forEach(x=>{ const on=x.dataset.size===dockSize; x.classList.toggle('on',on); x.setAttribute('aria-pressed',on?'true':'false'); });
+  $('#dockRestore').hidden=!(layoutMode==='desk'&&dockSize==='hidden');
+  if(dockSize==='hidden'&&layoutMode==='desk') closePanel();
+  requestAnimationFrame(()=>{ updateViewTargets(); applyCoach(); }); }
+function setDockSize(k){ dockSize=k; store.set('dock',k); applyDockSize(); }
+// progressive reveal: a control appears once the quest that teaches it is open (or done), or with Show all controls
+let showAllCtl=!!store.get('allCtl',false);
+function refreshLocks(){ const cur=MISSIONS.findIndex(m=>!progress.done[m.id]), ci=cur<0?MISSIONS.length:cur;
+  const open=q=>{ const i=MISSIONS.findIndex(m=>m.id===q); return showAllCtl||!!progress.done[q]||i<0||i<=ci; };
+  let any=false; $$('[data-unlock]').forEach(e=>{ const lk=!open(e.dataset.unlock); e.classList.toggle('locked',lk); if(lk) any=true; });
+  $$('[data-lockgroup]').forEach(g=>{ const k=[...g.querySelectorAll('[data-unlock]')]; g.classList.toggle('locked',k.length>0&&k.every(x=>x.classList.contains('locked'))); });
+  $('#lockNote').hidden=!any; document.body.classList.toggle('show-all',showAllCtl);
+  const cb=$('#allCtl'); if(cb) cb.checked=showAllCtl; }
+// the panel for Studio, Show, and Learn on desktop (and everything else on phones on their side)
+const TAB_NAMES={mix:'Mix',studio:'Studio',show:'Show',learn:'Learn'};
+let panelBack=null;
+function openPanel(){ const p=$('#panelWin'); if(p.hidden) panelBack=document.activeElement; p.hidden=false; $('#pwTitle').textContent=TAB_NAMES[curTab]||'';
+  $$('.tabs button').forEach(x=>x.classList.toggle('on',x.dataset.tab===curTab)); requestAnimationFrame(applyCoach); }
+function closePanel(){ const p=$('#panelWin'); if(p.hidden) return; p.hidden=true; if(layoutMode==='desk') setTab('mix'); if(panelBack&&panelBack.focus&&document.body.contains(panelBack)) panelBack.focus(); applyCoach(); }
+/* tooltips: one friendly sentence per control on hover (after a short pause) or a long press */
+let tipEl=null, tipTimer=0, tipFor=null;
+function showTip(t){ const txt=t.dataset.tip; if(!txt) return; if(!tipEl){ tipEl=el('div','ctlTip'); tipEl.setAttribute('role','tooltip'); document.body.append(tipEl); }
+  tipEl.textContent=txt; tipEl.style.display='block'; const r=t.getBoundingClientRect(), w=tipEl.offsetWidth, h=tipEl.offsetHeight;
+  let x=Math.min(innerWidth-w-8,Math.max(8,r.left+r.width/2-w/2)), y=r.top-h-10, below=y<8; if(below) y=r.bottom+10;
+  tipEl.style.left=x+'px'; tipEl.style.top=y+'px'; tipEl.classList.toggle('below',below); tipEl.style.setProperty('--ax',(r.left+r.width/2-x)+'px'); tipFor=t; }
+function hideTip(){ clearTimeout(tipTimer); if(tipEl) tipEl.style.display='none'; tipFor=null; }
+function bindTips(){ let down=null;
+  document.addEventListener('pointerover',e=>{ if(e.pointerType!=='mouse') return; const t=e.target.closest('[data-tip]'); if(!t||t===tipFor) return; hideTip(); tipTimer=setTimeout(()=>showTip(t),450); });
+  document.addEventListener('pointerout',e=>{ if(e.pointerType!=='mouse') return; const t=e.target.closest('[data-tip]'); if(t&&!t.contains(e.relatedTarget)) hideTip(); });
+  document.addEventListener('pointerdown',e=>{ if(e.pointerType==='mouse'){ hideTip(); return; } const t=e.target.closest('[data-tip]'); hideTip(); if(!t) return; down={x:e.clientX,y:e.clientY};
+    tipTimer=setTimeout(()=>{ showTip(t); setTimeout(hideTip,2600); },550); },true);
+  document.addEventListener('pointermove',e=>{ if(down&&Math.hypot(e.clientX-down.x,e.clientY-down.y)>8){ clearTimeout(tipTimer); down=null; } },true);
+  ['pointerup','pointercancel'].forEach(ev=>document.addEventListener(ev,()=>{ clearTimeout(tipTimer); down=null; },true));
+  window.addEventListener('scroll',hideTip,true); }
 function setTab(tab){
   curTab=tab;
   $$('.tabs button').forEach(x=>x.classList.toggle('on',x.dataset.tab===tab));
   $$('.tabBody').forEach(t=>t.hidden=t.id!=='tab-'+tab);
+  if(!$('#panelWin').hidden) $('#pwTitle').textContent=TAB_NAMES[tab]||'';
 }
 function setSheet(open){
   const c=$('#console'); c.classList.toggle('open',open); document.body.classList.toggle('sheet-open',open&&isMobile());
@@ -2717,10 +2808,24 @@ function setSheet(open){
 }
 function bindGlobal(){
   $$('.tabs button').forEach(b=>b.addEventListener('click',()=>{
-    const c=$('#console');
-    if(isMobile()){ if(c.classList.contains('open')&&curTab===b.dataset.tab){ setSheet(false); return; } setTab(b.dataset.tab); setSheet(true); }
-    else { setTab(b.dataset.tab); applyCoach(); }
+    const c=$('#console'), t=b.dataset.tab;
+    if(layoutMode==='sheet'){ if(c.classList.contains('open')&&curTab===t){ setSheet(false); return; } setTab(t); setSheet(true); }
+    else if(layoutMode==='desk'){ if(t==='mix'||(curTab===t&&!$('#panelWin').hidden)){ closePanel(); setTab('mix'); } else { setTab(t); openPanel(); } }
+    else { setTab(t); openPanel(); }
+    applyCoach();
   }));
+  // the platters start and stop their decks too
+  ['A','B'].forEach(id=>{ const p=$('#core'+id+' .platter'), go=()=>{ if(audioReady) togglePlay(decks[id]); };
+    p.addEventListener('click',go); p.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); go(); } }); });
+  $$('.sizeSeg button').forEach(b=>b.addEventListener('click',()=>setDockSize(b.dataset.size)));
+  $('#dockRestore').addEventListener('click',()=>setDockSize(store.get('dockLast','compact')==='hidden'?'compact':store.get('dockLast','compact')));
+  $$('.sizeSeg button').forEach(b=>b.addEventListener('click',()=>{ if(b.dataset.size!=='hidden') store.set('dockLast',b.dataset.size); }));
+  $('#allCtl').addEventListener('change',e=>{ showAllCtl=e.target.checked; store.set('allCtl',showAllCtl); refreshLocks(); applyCoach(); });
+  $('#moreBtn').addEventListener('click',()=>{ if($('#panelWin').hidden){ openPanel(); } else closePanel(); });
+  $('#pwClose').addEventListener('click',closePanel);
+  document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&!$('#panelWin').hidden&&$('#helpSheet').hidden) closePanel(); });
+  bindTips(); layoutControls(); refreshLocks();
+  window.addEventListener('resize',()=>{ layoutControls(); hideTip(); });
   $('#handle').addEventListener('click',()=>setSheet(!$('#console').classList.contains('open')));
   $$('.cams button').forEach(b=>b.addEventListener('click',()=>setPreset(b.dataset.cam)));
   let camIdx=0; const camOrder=['island','front','dj','reef'], camNames={island:'Island view',front:'Front row',dj:"Shigost's view",reef:'Reef view'};
@@ -2748,10 +2853,10 @@ function bindGlobal(){
   $('#fxGate').addEventListener('click',()=>{ if(!audioReady) return; gateOn=!gateOn; if(!gateOn) gateG.gain.cancelScheduledValues(0), gateG.gain.rampTo(1,0.02); $('#fxGate').classList.toggle('on',gateOn); });
   $('#ambVol').addEventListener('input',e=>{ ambLevel=+e.target.value; });
   $('#fxVerb').addEventListener('click',()=>{ if(!audioReady) return; verbOn=!verbOn; verbSend.gain.rampTo(verbOn?0.45:0,0.2); $('#fxVerb').classList.toggle('on',verbOn); });
-  $('#coachPill').addEventListener('click',()=>{ setTab('learn'); if(isMobile()) setSheet(true); else applyCoach(); });
+  $('#coachPill').addEventListener('click',()=>{ setTab('learn'); if(layoutMode==='sheet') setSheet(true); else openPanel(); applyCoach(); });
   $('#resetProgress').addEventListener('click',()=>{ if(confirm('Reset all quests and XP? Your saved tracks stay.')){ progress={xp:0,done:{}}; store.set('progress',progress); show.paintPattern=false; show.paintText=false; saveShow(); renderMissions(); } });
   window.addEventListener('resize',()=>{ document.body.classList.toggle('sheet-open',isMobile()&&$('#console').classList.contains('open')); });
-  if(window.ResizeObserver) new ResizeObserver(()=>updateViewTargets()).observe($('#console'));
+  if(window.ResizeObserver){ const ro=new ResizeObserver(()=>updateViewTargets()); ro.observe($('#console')); ro.observe($('#s-landCenter')); }
   /* Phones: iPhones mute web audio while the ring/silent switch is on, unless the page says it is media playback.
      audioSession (Safari 17+) does that directly; on older iPhones a silent looping <audio> element started from the tap
      moves the page into the media channel. Mobile browsers also suspend audio when the tab goes to the background or a
