@@ -94,7 +94,7 @@ h3 small{font-family:'DM Sans',sans-serif;color:var(--muted);font-weight:400;fon
   .stat .statLabel,#lvlChip,.stat.tempo{display:none}
   .stat b{font-size:.8rem}
   .camBtn,.helpBtn{display:grid}
-  .sheet-open .coachPill{display:none}
+  .sheet-open .coachPill,.sheet-open .questChip{display:none}
   .coachPill{padding:6px 12px 6px 6px;gap:8px;border-radius:999px;max-width:min(340px,86vw);bottom:calc(var(--sheetH) + 10px)}
   .coachPill .cpDot{width:24px;height:24px;font-size:.72rem}
   .coachPill .cpTitle{font-size:.8rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -468,3 +468,45 @@ details p{font-size:.83rem;line-height:1.5;margin:8px 0 2px}
 /* the start button and Reef bar sit above whatever the controls cover */
 .startMusic{top:calc((100vh - var(--sheetH,0px)) * .46)}
 @media (prefers-reduced-motion:reduce){ .core.nudge .platter::before{animation:none;transform:scale(1.06);opacity:.8} .core.live .vinyl{animation-duration:6s} .core.cued .platter{animation:none} }
+
+/* ---- quest chip: a small "Quest 2 of 17" that opens to the quest card ---- */
+.questChip{position:fixed;z-index:6;left:calc((100vw - var(--consoleW)) / 2);transform:translateX(-50%);bottom:calc(var(--sheetH,0px) + env(safe-area-inset-bottom,0px) + 12px);display:flex;flex-direction:column-reverse;align-items:center;gap:6px;max-width:min(380px,90vw)}
+.qcToggle{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);background:var(--solid);color:var(--ink);border-radius:999px;padding:5px 12px 5px 5px;font-weight:600;font-size:.82rem;box-shadow:var(--shadow)}
+.qcToggle .cpDot{flex:none;width:24px;height:24px;border-radius:50%;background:var(--berry);color:#fff;display:grid;place-items:center;font-weight:700;font-size:.74rem}
+.qcChev{color:var(--muted);font-size:.7rem}
+.qcCard{background:var(--solid);color:var(--ink);border:1px solid var(--line);border-radius:18px;padding:12px 14px;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:4px;width:min(380px,90vw)}
+.qcCard[hidden]{display:none}
+.qcCard .cpTitle{font-weight:700;font-size:.92rem}
+.qcCard .cpHow{font-size:.8rem;color:var(--muted);line-height:1.4}
+.qcAll{align-self:flex-start;margin-top:4px;border:none;background:none;padding:0;color:var(--berryDeep);font-weight:700;font-size:.8rem;text-decoration:underline}
+.mode-land .questChip{bottom:calc(var(--sheetH,0px) + 6px);max-width:calc(100vw - 2 * clamp(92px,30vh,138px) - 96px)}
+.mode-land .qcCard{width:min(380px,calc(100vw - 2 * clamp(92px,30vh,138px) - 96px))}
+/* the circled i */
+.iGlyph{display:grid;place-items:center;width:20px;height:20px;border-radius:50%;border:2px solid currentColor;font-family:'Fraunces',Georgia,serif;font-style:italic;font-weight:700;font-size:.78rem;line-height:1}
+/* ---- info hub ---- */
+.infoCard{width:min(520px,100%)}
+.infoHead{display:flex;align-items:center;gap:10px} .infoHead h2{flex:1;margin:0}
+.infoCard #replayTour{margin:12px 0 4px}
+.infoCard details{border-top:1px solid var(--line);padding:10px 0}
+.infoCard summary{cursor:pointer;font-family:'Fraunces',Georgia,serif;font-weight:600;font-size:1.05rem}
+.infoCard details p{margin:8px 0 0;font-size:.92rem}
+.infoCard a{color:var(--berryDeep)}
+.infoCard .placeholder{background:repeating-linear-gradient(-45deg,#fff3c4 0 10px,#ffeaa0 10px 20px);color:#4a3a00;border-radius:10px;padding:8px 10px;font-weight:600}
+/* ---- tour ---- */
+.tour{position:fixed;inset:0;z-index:90}
+.tour[hidden]{display:none}
+.tourDim{position:absolute;inset:0;width:100%;height:100%}
+.tourRing{fill:none;stroke:#fff;stroke-width:2.5;stroke-dasharray:7 6;animation:tourMarch 1.2s linear infinite}
+@keyframes tourMarch{to{stroke-dashoffset:-26}}
+.tourCard{position:absolute;background:var(--solid);color:var(--ink);border-radius:20px;padding:16px 18px 14px;box-shadow:0 18px 50px rgba(0,0,0,.45)}
+.tourStep{margin:0;font-size:.72rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.tourCard h2{margin:4px 0 6px;font-family:'Fraunces',Georgia,serif;font-weight:600;font-size:1.3rem}
+.tourCard p#tourText{margin:0;font-size:.92rem;line-height:1.45}
+.tourBtns{display:flex;align-items:center;gap:8px;margin-top:14px} .tourBtns span{flex:1}
+.tourBtns button{border:none;border-radius:999px;font-weight:700;padding:9px 16px}
+.tourSkip{background:none;color:var(--muted);padding-left:0!important;text-decoration:underline}
+.tourBack{background:var(--sunk);color:var(--ink)}
+.tourNext{background:var(--berry);color:#fff}
+.tourBack[hidden]{display:none}
+@media (prefers-reduced-motion:reduce){ .tourRing{animation:none} }
+@media (max-height:500px){ .tourCard{padding:10px 14px 10px;border-radius:16px} .tourCard h2{font-size:1.05rem;margin:2px 0 4px} .tourCard p#tourText{font-size:.82rem;line-height:1.35} .tourBtns{margin-top:8px} .tourBtns button{padding:7px 14px} }

@@ -22,6 +22,7 @@ Vibe Booth is a gamified 3D EDM/DJ web app by Recklyss Studios, live at https://
 - Mix controls: one set of parts (`#parts` in index.html: `coreA/B` platter and Play, `padsA/B`, `knobsA/B`, `faderA/B`, `xfU`, `fxU`, `tempoU`, `showRow`, `tabsNav`, `dockTools`) that `layoutControls` places by screen shape (`mode-desk` controller dock, `mode-sheet` phone sheet, `mode-land` phone on its side). Desktop dock size (`dockSize`: full, compact, hidden) and Show all controls are saved. Controls with `data-unlock` appear when that quest opens (`refreshLocks`); `data-tip` gives the tooltip. Quest targets use the part ids, and `applyCoach` points at whatever reveals a hidden target.
 - Shigost: `buildShigost`, `updateShigost`, IK in `ik2`, clips via `sgMove('dance'|'jump')`.
 - Game: `MISSIONS`, `LEVELS`, `complete(id)`, `addXP`, coach pill.
+- Onboarding: first-run tour (`TOUR`, `startTour`; saved as `tourDone`), quest chip (`renderQuestChip`; the coach pulse only runs while it is open), info hub (`#infoSheet`: replay tutorial, how to play, FAQ, credits and licenses, CHamoru note, and placeholder Privacy and Terms that need real text), first-play cues (`showStartMusic`, `updatePlayNudge`, `updateDeckBubble`). F toggles the performance overlay; `?debug` turns it on.
 - `update3D` and `frame` are the per-frame loops.
 
 ## Rules for this project

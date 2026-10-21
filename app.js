@@ -164,6 +164,21 @@ function complete(id){
   sgHappy(1.2);
   addXP(m.xp); renderMissions();
 }
+let questOpen=false, lastQuestId=undefined;
+function renderQuestChip(cur){
+  const q=$('#questChip'); q.innerHTML=''; const n=MISSIONS.length, idx=cur?MISSIONS.indexOf(cur)+1:n;
+  // a new quest opens the card once, so the player sees what's next (not on page load)
+  const id=cur?cur.id:'done'; if(lastQuestId!==undefined&&id!==lastQuestId&&!tourOn) questOpen=true; lastQuestId=id;
+  q.classList.toggle('open',questOpen);
+  const t=el('button','qcToggle'); t.type='button'; t.setAttribute('aria-expanded',questOpen?'true':'false'); t.setAttribute('aria-controls','questCard');
+  t.append(el('span','cpDot',cur?String(idx):'★'),el('span','qcLab',cur?'Quest '+idx+' of '+n:'All '+n+' quests done'),el('span','qcChev',questOpen?'▾':'▴'));
+  t.addEventListener('click',()=>{ questOpen=!questOpen; renderQuestChip(MISSIONS.find(m=>!progress.done[m.id])); applyCoach(); });
+  q.append(t);
+  const card=el('div','qcCard'); card.id='questCard'; card.hidden=!questOpen;
+  card.append(el('span','cpTitle',cur?cur.title:'Every quest done'),el('span','cpHow',cur?cur.how:'Freestyle time. Shigost is proud of you.'));
+  const all=el('button','qcAll','See all quests'); all.type='button';
+  all.addEventListener('click',()=>{ setTab('learn'); if(layoutMode==='sheet') setSheet(true); else openPanel(); applyCoach(); });
+  card.append(all); q.append(card); }
 function renderMissions(){
   const list=$('#missionList'); list.innerHTML='';
   const cur=MISSIONS.find(m=>!progress.done[m.id]);
@@ -173,11 +188,7 @@ function renderMissions(){
     const title=el('div','mTitle',m.title); title.append(el('span','mXp','+'+m.xp+' XP'));
     body.append(title,el('div','mHow',m.how)); row.append(el('div','mIcon',progress.done[m.id]?'✓':String(i+1)),body); list.append(row);
   });
-  const q=$('#coachPill'); q.innerHTML='';
-  const txt=el('span');
-  if(cur){ const idx=MISSIONS.indexOf(cur)+1; q.append(el('span','cpDot',String(idx))); txt.append(el('span','cpTitle',cur.title),el('span','cpHow',cur.how)); }
-  else { q.append(el('span','cpDot','★')); txt.append(el('span','cpTitle','Every quest done'),el('span','cpHow','Freestyle time. Shigost is proud of you.')); }
-  q.append(txt);
+  renderQuestChip(cur);
   $('#doneCount').textContent=Object.keys(progress.done).length+' of '+MISSIONS.length+' done';
   updateHeader(); refreshLocks(); applyCoach();
 }
@@ -193,7 +204,7 @@ function revealer(tab){ const m=layoutModeNow(), tb=$('.tabs button[data-tab='+t
   return tb; }
 function applyCoach(){
   $$('.coach').forEach(e=>e.classList.remove('coach'));
-  const m=MISSIONS.find(x=>!progress.done[x.id]); if(!m) return;
+  const m=MISSIONS.find(x=>!progress.done[x.id]); if(!m||!questOpen||tourOn) return;
   let t=$(m.target);
   if(m.tab&&!tabVisible(m.tab)) t=revealer(m.tab);
   else if(!shown(t)) t=revealer(m.tab||'mix');
@@ -2508,7 +2519,7 @@ let last=performance.now(), T=0, uiT=0;
 /* Each part of the frame runs on its own, so one failing part can't freeze the rest: the first error from each part is
    logged once (with its stack) and kept in window.vibeBoothErrors, and the scene keeps rendering. Add ?debug to the URL
    to see these, plus the GPU and audio details, on screen (handy on a phone with no console). */
-const DEBUG=/[?&]debug\b/.test(location.search), frameErr={};
+let DEBUG=/[?&]debug\b/.test(location.search); const frameErr={};
 window.vibeBoothErrors=[];
 function reportErr(part,e){ if(frameErr[part]) return; frameErr[part]=true; const msg=part+': '+(e&&e.stack?e.stack:String(e));
   window.vibeBoothErrors.push(msg); console.error('[Vibe Booth] '+msg); if(DEBUG) debugPanel(); }
@@ -2523,6 +2534,9 @@ function debugPanel(){ if(!DEBUG) return; if(!dbgEl){ dbgEl=document.createEleme
     bad.length?'shader failed: '+bad.join(', '):'shaders ok ('+(renderer?renderer.info.programs.length:0)+')',
     ...window.vibeBoothErrors].join('\n'); }
 window.addEventListener('error',e=>reportErr('page',e.error||e.message));
+// F shows or hides the performance overlay (fps, GPU, audio), unless you're typing
+document.addEventListener('keydown',e=>{ if((e.key==='f'||e.key==='F')&&!e.ctrlKey&&!e.metaKey&&!e.altKey&&!/^(INPUT|TEXTAREA|SELECT)$/.test((e.target&&e.target.tagName)||'')&&!e.target.isContentEditable){
+  DEBUG=!DEBUG; if(DEBUG) debugPanel(); else if(dbgEl){ dbgEl.remove(); dbgEl=null; } } });
 window.addEventListener('unhandledrejection',e=>reportErr('promise',e.reason));
 function frame(now){
   requestAnimationFrame(frame);
@@ -2795,6 +2809,50 @@ function bindTips(){ let down=null;
   document.addEventListener('pointermove',e=>{ if(down&&Math.hypot(e.clientX-down.x,e.clientY-down.y)>8){ clearTimeout(tipTimer); down=null; } },true);
   ['pointerup','pointercancel'].forEach(ev=>document.addEventListener(ev,()=>{ clearTimeout(tipTimer); down=null; },true));
   window.addEventListener('scroll',hideTip,true); }
+/* ---------- first-run tour: six skippable steps, each spotlighting one part of the screen ---------- */
+const firstSession=!store.get('visited',false); store.set('visited',true);
+let tourOn=false, tourI=0, tourBack=null, tourTipShown=false;
+const tourEls=(...sel)=>sel.map(s=>typeof s==='string'?$(s):s).filter(e=>e&&e.getClientRects().length);
+const TOUR=[
+  {title:'Start the music',text:'Tap this button to hear Deck A. The music always comes in right on the beat.',at:()=>tourEls('.startBtn')},
+  {title:'Your decks',text:'Each deck plays a track. Tap a record, or the button under it, to play or pause. Deck A is pink and Deck B is blue.',at:()=>tourEls('#coreA','#coreB')},
+  {title:'The crossfader',text:'Slide it toward A or B to choose which deck the crowd hears. Move it slowly for a smooth mix.',at:()=>tourEls('#xfU')},
+  {title:'Build and drop',text:'Drop makes a big moment. Build adds a 2-bar build-up first, then drops. Build, Flames, and Lasers unlock as you finish quests.',at:()=>tourEls('#showRow')},
+  {title:'Tap the island',text:'Tap Shigost, the volcano, the water, the palms, and more to see what happens. Drag to look around.',at:()=>{ const v=new THREE.Vector3(0,0.6,2.1).project(camera); // the dance floor and crowd
+    if(v.z>1) return []; const x=(v.x+1)/2*view.w, y=(1-v.y)/2*view.h, r=Math.min(140,view.w*0.24,view.h*0.2); return [{getBoundingClientRect:()=>({left:x-r,top:y-r*0.8,right:x+r,bottom:y+r*0.8,width:2*r,height:1.6*r}),round:true}]; }},
+  {title:'Quests',text:'Your next quest lives here. Tap it to see what to do. The Learn tab lists every quest and explains real DJ gear.',at:()=>tourEls('#questChip',layoutMode==='land'?null:'.tabs [data-tab=learn]')}];
+function startTour(){ if(tourOn) return; tourOn=true; tourBack=document.activeElement; tourI=0; hideTip(); closePanel(); if(layoutMode==='sheet') setSheet(false);
+  $('#tour').hidden=false; applyCoach(); showTourStep(1); }
+function endTour(){ if(!tourOn) return; tourOn=false; $('#tour').hidden=true; store.set('tourDone',true);
+  questOpen=true; renderQuestChip(MISSIONS.find(m=>!progress.done[m.id])); applyCoach();
+  const sb=$('.startBtn'), f=sb||tourBack; if(f&&f.focus) f.focus();
+  if(firstSession&&!tourTipShown){ tourTipShown=true; setTimeout(()=>{ if(!tourOn) toast('Tip: tap Shigost, the flame cannons, or the round screen'); },1500); } }
+function showTourStep(dir){
+  // skip steps whose part isn't on screen (the Start button after the first play, for example)
+  while(tourI>=0&&tourI<TOUR.length&&!TOUR[tourI].at().length) tourI+=dir;
+  if(tourI>=TOUR.length){ endTour(); return; } if(tourI<0){ tourI=0; showTourStep(1); return; }
+  const st=TOUR[tourI], els=st.at(), pad=10, holes=$('#tourHoles'), rings=$('#tourRings'); holes.innerHTML=''; rings.innerHTML='';
+  let u=null; const NS='http://www.w3.org/2000/svg';
+  els.forEach(e=>{ const r=e.getBoundingClientRect(), x=r.left-pad, y=r.top-pad, w=r.width+2*pad, hh=r.height+2*pad, rad=e.round?Math.min(w,hh)/2:16;
+    [holes,rings].forEach((g,k)=>{ const q=document.createElementNS(NS,'rect'); q.setAttribute('x',x); q.setAttribute('y',y); q.setAttribute('width',w); q.setAttribute('height',hh); q.setAttribute('rx',rad);
+      if(k){ q.setAttribute('class','tourRing'); } else q.setAttribute('fill','#000'); g.append(q); });
+    u=u?{l:Math.min(u.l,x),t:Math.min(u.t,y),r:Math.max(u.r,x+w),b:Math.max(u.b,y+hh)}:{l:x,t:y,r:x+w,b:y+hh}; });
+  const n=TOUR.filter(t=>t.at().length).length, k=TOUR.slice(0,tourI+1).filter(t=>t.at().length).length;
+  $('#tourStep').textContent='Step '+k+' of '+n; $('#tourTitle').textContent=st.title; $('#tourText').textContent=st.text;
+  $('#tourBack').hidden=k<=1; $('#tourNext').textContent=k>=n?"Let's play":'Next';
+  // the card goes below the spotlight if it fits, otherwise above, otherwise in the middle
+  const card=$('.tourCard'), cw=Math.min(innerHeight<500?290:340,innerWidth-24); card.style.width=cw+'px'; const ch=card.offsetHeight;
+  const cx=Math.min(innerWidth-cw-12,Math.max(12,(u.l+u.r)/2-cw/2)), cy=Math.min(innerHeight-ch-8,Math.max(8,(u.t+u.b)/2-ch/2));
+  const spots=[[cx,u.b+12],[cx,u.t-ch-12],[u.r+14,cy],[u.l-cw-14,cy],[cx,Math.max(8,(innerHeight-ch)/2)]];
+  const fits=([x,y])=>x>=8&&y>=8&&x+cw<=innerWidth-8&&y+ch<=innerHeight-8;
+  const [left,top]=spots.find(fits)||spots[4]; card.style.left=left+'px'; card.style.top=top+'px';
+  setTimeout(()=>$('#tourNext').focus({preventScroll:true}),30); }
+function bindTour(){ $('#tourNext').addEventListener('click',()=>{ tourI++; showTourStep(1); });
+  $('#tourBack').addEventListener('click',()=>{ tourI--; showTourStep(-1); });
+  $('#tourSkip').addEventListener('click',endTour);
+  document.addEventListener('keydown',e=>{ if(!tourOn) return; if(e.key==='Escape'){ e.preventDefault(); endTour(); } else if(e.key==='ArrowRight'){ tourI++; showTourStep(1); } else if(e.key==='ArrowLeft'&&!$('#tourBack').hidden){ tourI--; showTourStep(-1); }
+    else if(e.key==='Tab'){ const f=[...$$('.tourCard button')].filter(x=>!x.hidden); const i=f.indexOf(document.activeElement); e.preventDefault(); f[(i+(e.shiftKey?-1:1)+f.length)%f.length].focus(); } });
+  window.addEventListener('resize',()=>{ if(tourOn) requestAnimationFrame(()=>showTourStep(1)); }); }
 function setTab(tab){
   curTab=tab;
   $$('.tabs button').forEach(x=>x.classList.toggle('on',x.dataset.tab===tab));
@@ -2823,21 +2881,24 @@ function bindGlobal(){
   $('#allCtl').addEventListener('change',e=>{ showAllCtl=e.target.checked; store.set('allCtl',showAllCtl); refreshLocks(); applyCoach(); });
   $('#moreBtn').addEventListener('click',()=>{ if($('#panelWin').hidden){ openPanel(); } else closePanel(); });
   $('#pwClose').addEventListener('click',closePanel);
-  document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&!$('#panelWin').hidden&&$('#helpSheet').hidden) closePanel(); });
-  bindTips(); layoutControls(); refreshLocks();
+  document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&!$('#panelWin').hidden&&$('#infoSheet').hidden&&!tourOn) closePanel(); });
+  bindTips(); bindTour(); layoutControls(); refreshLocks();
   window.addEventListener('resize',()=>{ layoutControls(); hideTip(); });
   $('#handle').addEventListener('click',()=>setSheet(!$('#console').classList.contains('open')));
   $$('.cams button').forEach(b=>b.addEventListener('click',()=>setPreset(b.dataset.cam)));
   let camIdx=0; const camOrder=['island','front','dj','reef'], camNames={island:'Island view',front:'Front row',dj:"Shigost's view",reef:'Reef view'};
-  // help sheet: copies the How to play text, offers the camera views, and closes on Got it, Escape, a view, or a tap outside
-  { const sheet=$('#helpSheet'); let back=null;
-    $('#helpText').innerHTML=[...$$('.howto p')].filter(p=>!p.classList.contains('howTitle')).map(p=>p.outerHTML).join('');
-    const close=()=>{ sheet.hidden=true; if(back&&back.focus) back.focus(); };
-    $('#helpBtn').addEventListener('click',()=>{ back=document.activeElement; sheet.hidden=false; $('#helpClose').focus(); });
-    $('#helpClose').addEventListener('click',close);
+  // info hub: tutorial replay, views, how to play, FAQ, credits, culture note, privacy, and terms
+  { const sheet=$('#infoSheet'); let back=null;
+    const close=()=>{ if(sheet.hidden) return; sheet.hidden=true; if(back&&back.focus) back.focus(); };
+    $('#infoBtn').addEventListener('click',()=>{ back=document.activeElement; sheet.hidden=false; $('#infoClose').focus(); });
+    $('#infoClose').addEventListener('click',close);
     sheet.addEventListener('click',e=>{ if(e.target===sheet) close(); });
-    document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&!sheet.hidden) close(); });
-    $$('.helpCams button').forEach(b=>b.addEventListener('click',close)); }
+    document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&!sheet.hidden){ e.stopPropagation(); close(); }
+      // keep keyboard focus inside the sheet while it is open
+      if(e.key==='Tab'&&!sheet.hidden){ const f=[...sheet.querySelectorAll('button,summary,a,[tabindex]')].filter(x=>x.getClientRects().length); if(!f.length) return;
+        const a=f[0], z=f[f.length-1]; if(e.shiftKey&&document.activeElement===a){ e.preventDefault(); z.focus(); } else if(!e.shiftKey&&document.activeElement===z){ e.preventDefault(); a.focus(); } } },true);
+    $$('.helpCams button').forEach(b=>b.addEventListener('click',close));
+    $('#replayTour').addEventListener('click',()=>{ close(); startTour(); }); }
   $('#camCycle').addEventListener('click',()=>{ camIdx=(camIdx+1)%camOrder.length; setPreset(camOrder[camIdx]); toast(camNames[camOrder[camIdx]]); });
   $('#pA').addEventListener('click',()=>{ if(audioReady) togglePlay(decks.A); });
   $('#pB').addEventListener('click',()=>{ if(audioReady) togglePlay(decks.B); });
@@ -2853,7 +2914,7 @@ function bindGlobal(){
   $('#fxGate').addEventListener('click',()=>{ if(!audioReady) return; gateOn=!gateOn; if(!gateOn) gateG.gain.cancelScheduledValues(0), gateG.gain.rampTo(1,0.02); $('#fxGate').classList.toggle('on',gateOn); });
   $('#ambVol').addEventListener('input',e=>{ ambLevel=+e.target.value; });
   $('#fxVerb').addEventListener('click',()=>{ if(!audioReady) return; verbOn=!verbOn; verbSend.gain.rampTo(verbOn?0.45:0,0.2); $('#fxVerb').classList.toggle('on',verbOn); });
-  $('#coachPill').addEventListener('click',()=>{ setTab('learn'); if(layoutMode==='sheet') setSheet(true); else openPanel(); applyCoach(); });
+
   $('#resetProgress').addEventListener('click',()=>{ if(confirm('Reset all quests and XP? Your saved tracks stay.')){ progress={xp:0,done:{}}; store.set('progress',progress); show.paintPattern=false; show.paintText=false; saveShow(); renderMissions(); } });
   window.addEventListener('resize',()=>{ document.body.classList.toggle('sheet-open',isMobile()&&$('#console').classList.contains('open')); });
   if(window.ResizeObserver){ const ro=new ResizeObserver(()=>updateViewTargets()); ro.observe($('#console')); ro.observe($('#s-landCenter')); }
@@ -2883,7 +2944,8 @@ function bindGlobal(){
     try{ initAudio(); }catch(e){ console.error(e); toast('Audio could not start in this browser. The visuals still work.','warn'); }
     $('#gate').remove();
     showStartMusic();
-    setTimeout(()=>{ if(!startEl) toast('Tip: tap Shigost, the flame cannons, or the round screen'); },1600);
+    if(!store.get('tourDone',false)) setTimeout(startTour,700);
+    else if(firstSession) setTimeout(()=>{ if(!startEl&&!tourOn) toast('Tip: tap Shigost, the flame cannons, or the round screen'); },1600);
   });
 }
 
