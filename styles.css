@@ -467,3 +467,4 @@ details p{font-size:.83rem;line-height:1.5;margin:8px 0 2px}
 .mode-land .masthead h1{font-size:1.3rem}
 /* the start button and Reef bar sit above whatever the controls cover */
 .startMusic{top:calc((100vh - var(--sheetH,0px)) * .46)}
+@media (prefers-reduced-motion:reduce){ .core.nudge .platter::before{animation:none;transform:scale(1.06);opacity:.8} .core.live .vinyl{animation-duration:6s} .core.cued .platter{animation:none} }
